@@ -49,8 +49,11 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       # Pushes made with the workflow token don't always start a Pages build, so ask for one.
+      # The data is already committed by now, so a failure here only warns instead of failing the run.
       - name: Publish the update
         if: steps.commit.outputs.changed == 'true' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api --method POST "/repos/${GITHUB_REPOSITORY}/pages/builds"
+        run: |
+          gh api --method POST "/repos/${GITHUB_REPOSITORY}/pages/builds" \
+            || echo "::warning::Could not request a Pages build. The site updates on the next push or manual build."
