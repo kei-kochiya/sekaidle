@@ -23,13 +23,17 @@ Then open <http://localhost:4173/>. Any static file server works too.
 
 `data/characters.json` and `data/cards.json` are generated from the community-maintained [Sekai-World master database](https://github.com/Sekai-World/sekai-master-db-diff) (the same source [IchikaBot](https://github.com/kei-kochiya/IchikaBot) uses), with English names and profiles from the EN database where they exist.
 
-To refresh them after new cards are released:
+### Automatic refresh
+
+A GitHub Action ([`refresh-data.yml`](.github/workflows/refresh-data.yml)) rebuilds the data every Monday and commits it only if something changed, then asks Pages to rebuild. You can also run it from the Actions tab (*Run workflow*).
+
+To refresh by hand:
 
 ```bash
 npm run build:data:verify
 ```
 
-`--verify-images` additionally checks that every card's art exists on the image host and drops any that don't. The script downloads about 70 MB of master data and writes about 100 KB of JSON.
+The script downloads about 70 MB of master data and writes about 100 KB of JSON. It is incremental: cards already in `data/cards.json` are kept as they are, and `--verify-images` only checks the art of cards that are new since the last run. A new card whose art isn't online yet is skipped and picked up on a later run. If nothing changed it writes nothing.
 
 ## Art
 
@@ -38,6 +42,7 @@ Card art and face thumbnails are loaded in the player's browser from the communi
 ## How the puzzles work
 
 - The daily answer walks through a seeded shuffle of the pool, one per day, so nothing repeats until every character (or card) has been used. Everyone gets the same puzzle on the same local date.
+- Daily cards are drawn only from cards released at least 14 days before that day. That keeps the weekly data refresh from reshuffling a day's puzzle; new cards join the daily rotation after the delay (they are in Random mode immediately).
 - Birthdays have no year in the game, so they are compared by month and day only.
 - Ena's night-school classes and Kamiyama High School count as the same school; Virtual Singers have no school (and match each other).
 - Only the exact card wins in Card mode. Matching all three tiles means the right character, attribute and group, but a different card.
