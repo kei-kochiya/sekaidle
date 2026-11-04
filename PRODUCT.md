@@ -19,7 +19,7 @@ Project Sekai fans, mostly teens and young adults, playing on a phone in short s
 A Wordle-style daily game for the Project Sekai community with two modes, six guesses each:
 
 - **Character:** after each guess, tiles say whether the school matches, whether the answer's birthday is earlier or later, and whether the answer is taller, shorter or equal in height.
-- **Card:** a random 3- or 4-star card is shown heavily blurred and sharpens with each wrong guess. Each guessed card reports whether its attribute, its group (the unit; any Virtual Singer counts as Virtual Singer) and its character match.
+- **Card:** a random 3- or 4-star card is shown heavily blurred and sharpens with each wrong guess. A guess is a card plus the art picked for it (untrained or trained); it reports whether its attribute, its group (the unit; any Virtual Singer counts as Virtual Singer), its character and its art match.
 
 Success is a quick, fair puzzle people finish, share and return to the next day.
 

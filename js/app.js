@@ -188,9 +188,10 @@ function buildHelp() {
         'ul',
         {},
         h('li', {}, 'You see a 3 or 4-star card, heavily blurred. Every wrong guess sharpens it.'),
-        h('li', {}, 'Each guess is a card. Its attribute, group and character tiles say what matches the answer.'),
+        h('li', {}, 'Each guess is a card and the art you pick for it, Untrained or Trained. Four tiles say what matches the answer: attribute, group, character and art.'),
+        h('li', {}, 'The puzzle shows either the untrained or the trained art of its card, and the art tile is how you find out which. It also moves the Art switch to the answer’s art for you.'),
         h('li', {}, 'Group means the unit. A Virtual Singer counts as Virtual Singer, whatever unit the card is for.'),
-        h('li', {}, 'Only the exact card wins. If all three tiles match, it is the right character and attribute but a different card, so let the art decide.'),
+        h('li', {}, 'Only the exact card in the exact art wins. The right card in the other art counts as a miss, but you will be told so. If the first three tiles match on a different card, it is the right character and attribute, so let the art decide.'),
       ),
     ),
   ];

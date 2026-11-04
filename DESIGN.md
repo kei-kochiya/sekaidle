@@ -183,6 +183,9 @@ Six slanted bars. Used bars fill ink; a winning final bar fills green.
 ### Fields and chips
 48px field with a 3:1 boundary and a focus ring in `focus`. Chips are pills with an unit or attribute mark, and invert to ink when pressed.
 
+### Art switch
+A joined two-way pill (Untrained / Trained) under the card search, always visible so it works with the list closed. The pressed side inverts to ink like a chip. It picks the art a card guess is made with; list rows carry a quiet outlined "Trained" / "Untrained" tag, with no colour because it encodes neither a unit, attribute nor result.
+
 ### Art frame
 16:9 frame with container-relative blur (`cqw`) and a zoom that relaxes with the blur so soft edges stay hidden. Skeleton while loading; a retry state if the image fails.
 

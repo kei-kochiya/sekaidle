@@ -34,9 +34,18 @@ export function resetRandomSession(game, createAnswer) {
   return ensureSession({ game, mode: 'random', dateKey: null, createAnswer });
 }
 
-export function applyGuess(session, id) {
+/**
+ * Record a guess. By default it wins when `id` is the answer; a game whose guesses carry more
+ * than an id (the card game's art variant) passes `correct` itself. `art` is stored alongside
+ * the guess, index for index, so older saved sessions without it keep working.
+ */
+export function applyGuess(session, id, { correct = id === session.answer, art } = {}) {
   session.guesses.push(id);
-  if (id === session.answer) session.status = 'won';
+  if (art !== undefined) {
+    session.arts ??= [];
+    session.arts[session.guesses.length - 1] = art;
+  }
+  if (correct) session.status = 'won';
   else if (session.guesses.length >= MAX_GUESSES) session.status = 'lost';
   store.saveSession(session);
   if (session.status !== 'playing') store.recordDaily(session);
@@ -77,6 +86,7 @@ const KIND_LABELS = {
   attr: 'Attribute',
   group: 'Group',
   character: 'Character',
+  art: 'Art',
 };
 
 const DIRECTION_WORDS = {
@@ -84,9 +94,12 @@ const DIRECTION_WORDS = {
   height: { higher: 'the answer is taller', lower: 'the answer is shorter' },
 };
 
+/** Where "not a match" would mislead, say what a miss means. */
+const MISS_WORDS = { art: 'the answer uses the other art' };
+
 export function stateWords(kind, state) {
   if (state === 'correct') return 'correct';
-  if (state === 'wrong') return 'not a match';
+  if (state === 'wrong') return MISS_WORDS[kind] ?? 'not a match';
   return DIRECTION_WORDS[kind]?.[state] ?? state;
 }
 

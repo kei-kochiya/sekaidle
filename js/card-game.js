@@ -2,7 +2,7 @@
 
 import { h, icon, announce, prefersReducedMotion, sleep } from './dom.js';
 import { UNITS, UNIT_ORDER, ATTRIBUTES, ATTRIBUTE_ORDER, images } from './data.js';
-import { MAX_GUESSES } from './store.js';
+import { MAX_GUESSES, store } from './store.js';
 import { pickDaily, dailyCoin, puzzleNumber, epochDay } from './rng.js';
 import {
   ensureSession,
@@ -32,12 +32,19 @@ const PAGE_SIZE = 40;
 /** New cards join the daily rotation this many days after release (see createAnswer). */
 const DAILY_DELAY_DAYS = 14;
 
-/** Group means the unit; any Virtual Singer counts as "Virtual Singer", whichever unit's version of the card it is. */
-export function compareCards(guess, answer) {
+const artWord = (trained) => (trained ? 'Trained' : 'Untrained');
+
+/**
+ * Group means the unit; any Virtual Singer counts as "Virtual Singer", whichever unit's version of the
+ * card it is. A guess is a card *and* the art it is shown with, so `art` says whether that art
+ * (trained or untrained) is the one the puzzle shows.
+ */
+export function compareCards(guess, answer, { guessTrained, answerTrained }) {
   return {
     attr: guess.at === answer.at ? 'correct' : 'wrong',
     group: guess.unit === answer.unit ? 'correct' : 'wrong',
     character: guess.c === answer.c ? 'correct' : 'wrong',
+    art: guessTrained === answerTrained ? 'correct' : 'wrong',
   };
 }
 
@@ -65,18 +72,30 @@ export function mountCardGame(root, ctx) {
   let session = ensureSession({ game: 'card', mode, dateKey, createAnswer });
   // The saved answer wins over today's pool, so a data refresh never changes a puzzle mid-game.
   let answerCard = cardById.get(session.answer) ?? cardById.get(createAnswer().answer);
-  // Thumbnails show the same art variant as the puzzle, so a trained puzzle is compared with
-  // trained faces. A trained-only card has no other variant; the fallback covers a missing file.
-  const cardAvatar = (card, size) => {
-    const trained = card.trainedOnly || session.trained;
-    return createAvatar({
+  // A guess is a card plus the art (trained or untrained) the player picked for it. Whether the
+  // puzzle itself is trained stays hidden until a guess's art tile says so, so thumbnails show the
+  // art the player chose, never the answer's. Trained-only cards have no other art to choose.
+  let artMode = session.guesses.length
+    ? session.trained
+      ? 'trained'
+      : 'untrained'
+    : store.getPref('cardArt', 'untrained');
+  const artFor = (card) => card.trainedOnly || artMode === 'trained';
+
+  // Sessions saved before guesses carried their art were shown the puzzle's art, so they match it.
+  const guessTrained = (index) =>
+    session.arts?.[index] ?? (cardById.get(session.guesses[index]).trainedOnly || session.trained);
+  const guessKey = (id, trained) => `${id}:${trained ? 1 : 0}`;
+  const guessedKeys = () => new Set(session.guesses.map((id, i) => guessKey(id, guessTrained(i))));
+
+  // No fallback to the other art on purpose: a "trained" thumbnail must never quietly be untrained.
+  const cardAvatar = (card, size, trained) =>
+    createAvatar({
       src: images.thumb(card.b, trained),
-      fallback: card.trainedOnly ? null : images.thumb(card.b, !trained),
       initial: card.character.short[0],
       color: UNITS[card.unit].color,
       size,
     });
-  };
 
   let selectedId = null;
   let busy = false;
@@ -240,11 +259,37 @@ export function mountCardGame(root, ctx) {
   const none = h('p', { class: 'empty', hidden: true }, 'No card matches. Try fewer words or clear a filter.');
   const results = h('div', { id: 'card-results', class: 'picker-results' }, filters, count, list, none, more);
 
+  // Which art the next guess is made with. It lives outside the list so it stays reachable
+  // after a card is chosen and the list has closed.
+  const artButtons = ['untrained', 'trained'].map((key) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'seg-btn',
+        'aria-pressed': 'false',
+        dataset: { key },
+        onclick: () => {
+          store.setPref('cardArt', key);
+          setArtMode(key);
+        },
+      },
+      artWord(key === 'trained'),
+    ),
+  );
+  const artPick = h(
+    'div',
+    { class: 'art-pick' },
+    h('span', { class: 'art-pick-label', id: 'art-pick-label' }, 'Art'),
+    h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'art-pick-label' }, artButtons),
+  );
+
   const picker = h(
     'form',
     { class: 'picker', dataset: { open: 'false' }, autocomplete: 'off', novalidate: true },
     h('label', { class: 'sr-only', for: 'card-search' }, 'Search cards'),
     h('div', { class: 'picker-bar' }, field, submit),
+    artPick,
     results,
   );
 
@@ -276,8 +321,22 @@ export function mountCardGame(root, ctx) {
     toggle.setAttribute('aria-label', open ? 'Hide cards' : 'Show cards');
   }
 
-  const guessedIds = () => new Set(session.guesses);
-  const label = (card) => `${card.n} · ${card.character.short}`;
+  const label = (card) => `${card.n} · ${card.character.short} · ${artWord(artFor(card))}`;
+
+  function setArtMode(mode) {
+    artMode = mode;
+    for (const button of artButtons) button.setAttribute('aria-pressed', String(button.dataset.key === mode));
+    paintSelection();
+    renderList();
+  }
+
+  /** Show the chosen card in the field, in the art it would be guessed with. */
+  function paintSelection() {
+    if (selectedId == null) return;
+    const card = cardById.get(selectedId);
+    input.value = label(card);
+    lead.replaceChildren(cardAvatar(card, 28, artFor(card)));
+  }
 
   function matching() {
     const tokens = state.query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -298,11 +357,12 @@ export function mountCardGame(root, ctx) {
 
   function renderList() {
     const all = matching();
-    const guessed = guessedIds();
+    const guessed = guessedKeys();
     const shown = all.slice(0, state.limit);
     list.replaceChildren(
       ...shown.map((card) => {
-        const done = guessed.has(card.id);
+        const trained = artFor(card);
+        const done = guessed.has(guessKey(card.id, trained));
         return h(
           'li',
           {},
@@ -316,12 +376,19 @@ export function mountCardGame(root, ctx) {
               dataset: { id: card.id },
               onclick: () => select(card.id),
             },
-            cardAvatar(card, 48),
+            cardAvatar(card, 48, trained),
             h(
               'span',
               { class: 'card-opt-text' },
               h('span', { class: 'card-opt-name', lang: card.jp ? 'ja' : null }, card.n),
-              h('span', { class: 'card-opt-sub' }, card.character.short, ' · ', cardMeta(card)),
+              h(
+                'span',
+                { class: 'card-opt-sub' },
+                card.character.short,
+                ' · ',
+                cardMeta(card),
+                h('span', { class: 'art-tag' }, card.trainedOnly ? 'Trained only' : artWord(trained)),
+              ),
             ),
             done && h('span', { class: 'card-opt-done' }, 'Guessed'),
           ),
@@ -357,13 +424,12 @@ export function mountCardGame(root, ctx) {
     }
     const card = cardById.get(id);
     state.query = '';
-    input.value = label(card);
     submit.disabled = false;
-    lead.replaceChildren(
-      cardAvatar(card, 28),
-    );
+    paintSelection();
     setOpen(false);
-    announce(`${card.n}, ${card.character.name}, selected. Press Guess to submit.`);
+    announce(
+      `${card.n}, ${card.character.name}, ${artWord(artFor(card)).toLowerCase()} art, selected. Press Guess to submit.`,
+    );
   }
 
   let debounce = null;
@@ -390,7 +456,8 @@ export function mountCardGame(root, ctx) {
     if (selectedId == null) {
       clearTimeout(debounce);
       state.query = input.value;
-      const first = matching().find((card) => !guessedIds().has(card.id));
+      const guessed = guessedKeys();
+      const first = matching().find((card) => !guessed.has(guessKey(card.id, artFor(card))));
       if (first) select(first.id);
       return;
     }
@@ -415,12 +482,12 @@ export function mountCardGame(root, ctx) {
   const hint = h(
     'p',
     { class: 'empty' },
-    'Search for any card you think it could be. Tiles show whether its attribute, group and character match the answer.',
+    'Search for any card you think it could be, and pick the art you think it shows. Tiles show whether its attribute, group, character and art match the answer.',
   );
   const history = h('section', { class: 'history', 'aria-label': 'Guesses' }, list2, hint);
 
-  function buildRow(card, { pending }) {
-    const result = compareCards(card, answerCard);
+  function buildRow(card, trained, { pending }) {
+    const result = compareCards(card, answerCard, { guessTrained: trained, answerTrained: session.trained });
     const tiles = [
       createTile({
         kind: 'attr',
@@ -431,6 +498,7 @@ export function mountCardGame(root, ctx) {
       }),
       createTile({ kind: 'group', state: result.group, value: UNITS[card.unit].short, pending }),
       createTile({ kind: 'character', state: result.character, value: card.character.short, pending }),
+      createTile({ kind: 'art', state: result.art, value: artWord(trained), pending }),
     ];
     const row = h(
       'li',
@@ -439,7 +507,7 @@ export function mountCardGame(root, ctx) {
       h(
         'div',
         { class: 'row-card-head', 'aria-hidden': 'true' },
-        cardAvatar(card, 44),
+        cardAvatar(card, 44, trained),
         h(
           'div',
           { class: 'row-card-title' },
@@ -467,18 +535,21 @@ export function mountCardGame(root, ctx) {
 
   async function submitGuess() {
     if (busy || session.status !== 'playing' || selectedId == null) return;
-    if (guessedIds().has(selectedId)) return;
-    busy = true;
     const card = cardById.get(selectedId);
+    const trained = artFor(card);
+    if (guessedKeys().has(guessKey(card.id, trained))) return;
+    busy = true;
     const keepFocus = document.activeElement === input;
-    applyGuess(session, card.id);
+    // Only the exact card in the exact art wins. Right card, other art is a miss, and the art tile says so.
+    const exact = card.id === answerCard.id && trained === session.trained;
+    applyGuess(session, card.id, { correct: exact, art: trained });
     select(null);
     input.value = '';
     state.query = '';
     setOpen(false);
     renderList();
 
-    const { row, tiles, result } = buildRow(card, { pending: !reduced });
+    const { row, tiles, result } = buildRow(card, trained, { pending: !reduced });
     list2.prepend(row);
     hint.hidden = true;
     renderStatus();
@@ -488,12 +559,17 @@ export function mountCardGame(root, ctx) {
     const sameEverything = result.attr === 'correct' && result.group === 'correct' && result.character === 'correct';
     const left = MAX_GUESSES - session.guesses.length;
     if (session.status === 'playing') {
-      note.textContent = sameEverything
-        ? 'Same character, attribute and group, but a different card. Let the art decide.'
-        : '';
+      note.textContent =
+        card.id === answerCard.id
+          ? 'Right card, wrong art. Try its other version.'
+          : sameEverything
+            ? 'Same character, attribute and group, but a different card. Let the art decide.'
+            : '';
+      // The art tile has just told the player which art the puzzle shows; the picker follows it.
+      setArtMode(session.trained ? 'trained' : 'untrained');
     }
     announce(
-      `${card.n}. Attribute ${stateWords('attr', result.attr)}. Group ${stateWords('group', result.group)}. Character ${stateWords('character', result.character)}.` +
+      `${card.n}, ${artWord(trained).toLowerCase()} art. Attribute ${stateWords('attr', result.attr)}. Group ${stateWords('group', result.group)}. Character ${stateWords('character', result.character)}. Art ${stateWords('art', result.art)}.` +
         (session.status === 'playing' ? ` The art is a little sharper. ${plural(left, 'guess')} left.` : ''),
     );
     if (session.status !== 'playing') {
@@ -505,9 +581,9 @@ export function mountCardGame(root, ctx) {
 
   function shareText() {
     const marks = { correct: '🟩', wrong: '⬛' };
-    const rows = session.guesses.map((id) => {
-      const r = compareCards(cardById.get(id), answerCard);
-      return [r.attr, r.group, r.character].map((s) => marks[s]).join('');
+    const rows = session.guesses.map((id, i) => {
+      const r = compareCards(cardById.get(id), answerCard, { guessTrained: guessTrained(i), answerTrained: session.trained });
+      return [r.attr, r.group, r.character, r.art].map((s) => marks[s]).join('');
     });
     const score = session.status === 'won' ? session.guesses.length : 'X';
     const name = mode === 'daily' ? `Card #${puzzleNumber(dateKey)}` : 'Card (random)';
@@ -596,10 +672,10 @@ export function mountCardGame(root, ctx) {
   root.dataset.outcome = 'playing';
   root.replaceChildren(hero, picker, history);
   syncChips();
-  renderList();
-  for (const id of session.guesses) {
-    list2.prepend(buildRow(cardById.get(id), { pending: false }).row);
-  }
+  setArtMode(artMode);
+  session.guesses.forEach((id, i) => {
+    list2.prepend(buildRow(cardById.get(id), guessTrained(i), { pending: false }).row);
+  });
   hint.hidden = session.guesses.length > 0;
   setStage(Math.min(session.guesses.length, BLUR.length - 1));
   renderStatus();
