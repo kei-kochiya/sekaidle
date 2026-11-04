@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Sekaidle: a Project Sekai guessing game</title>
+    <meta
+      name="description"
+      content="Daily Wordle-style puzzles for Project Sekai fans. Name the character from their school, birthday and height, or name the card from blurred art."
+    />
+    <meta name="theme-color" content="#f6f5fb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#16162c" media="(prefers-color-scheme: dark)" />
+    <meta property="og:title" content="Sekaidle" />
+    <meta
+      property="og:description"
+      content="Guess the Project Sekai character or card in six tries. A new puzzle every day."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="fonts/archivo-var.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script>
+      // Apply a saved theme before first paint so there is no flash.
+      try {
+        var saved = JSON.parse(localStorage.getItem("sekaidle:v1") || "{}").prefs;
+        if (saved && (saved.theme === "light" || saved.theme === "dark")) {
+          document.documentElement.dataset.theme = saved.theme;
+        }
+      } catch (e) {}
+    </script>
+  </head>
+
+  <body>
+    <!-- Icon sprite: one stroke weight, drawn for this project. -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></symbol>
+        <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19.5v-15M5.5 11l6.5-6.5 6.5 6.5" /></symbol>
+        <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4.5v15M5.5 13l6.5 6.5 6.5-6.5" /></symbol>
+        <symbol id="i-help" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.8c0 1.7-2.4 2.1-2.4 3.7M12 17.2h.01" />
+        </symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-5" /></symbol>
+        <symbol id="i-contrast" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" />
+        </symbol>
+        <symbol id="i-share" viewBox="0 0 24 24">
+          <path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+        </symbol>
+        <symbol id="i-search" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4.5 4.5" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" /></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4.8h-4.8" />
+        </symbol>
+        <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21V4.5M6 5h11.5l-2.5 4 2.5 4H6" /></symbol>
+        <symbol id="i-dice" viewBox="0 0 24 24">
+          <rect x="4" y="4" width="16" height="16" rx="3.5" />
+          <path d="M9 9h.01M15 9h.01M12 12h.01M9 15h.01M15 15h.01" stroke-width="2.6" />
+        </symbol>
+        <symbol id="i-heart" viewBox="0 0 24 24">
+          <path d="M12 20s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.7C19.5 15.4 12 20 12 20z" />
+        </symbol>
+        <symbol id="i-drop" viewBox="0 0 24 24">
+          <path d="M12 3.5s6 6 6 10.2A6 6 0 0 1 6 13.7C6 9.5 12 3.5 12 3.5z" />
+        </symbol>
+        <symbol id="i-leaf" viewBox="0 0 24 24">
+          <path d="M5 19C5 10.5 10 5 19.5 5c0 9-5.5 14-14.5 14zM5 19l8-8" />
+        </symbol>
+        <symbol id="i-star" viewBox="0 0 24 24">
+          <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
+        </symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24">
+          <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <a class="skip" href="#game">Skip to the game</a>
+
+    <header class="topbar">
+      <div class="rail" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="page topbar-inner">
+        <a class="wordmark" href="#character" aria-label="Sekaidle, home">Sekaidle</a>
+        <div class="topbar-actions">
+          <button class="icon-btn" id="btn-help" type="button" aria-label="How to play" aria-haspopup="dialog">
+            <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help" /></svg>
+          </button>
+          <button class="icon-btn" id="btn-stats" type="button" aria-label="Statistics" aria-haspopup="dialog">
+            <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chart" /></svg>
+          </button>
+          <button class="icon-btn" id="btn-theme" type="button" aria-label="Switch colour theme">
+            <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-contrast" /></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="tabs" role="tablist" aria-label="Choose a game">
+        <button class="tab" role="tab" id="tab-character" type="button" aria-selected="true" aria-controls="game">
+          <strong>Character</strong>
+          <span>Guess who</span>
+        </button>
+        <button class="tab" role="tab" id="tab-card" type="button" aria-selected="false" aria-controls="game" tabindex="-1">
+          <strong>Card</strong>
+          <span>Unblur the art</span>
+        </button>
+      </div>
+
+      <div class="modebar">
+        <p class="mode-info" id="mode-info" aria-live="polite"></p>
+        <div class="seg" role="group" aria-label="Puzzle type">
+          <button type="button" id="mode-daily" aria-pressed="true">Daily</button>
+          <button type="button" id="mode-random" aria-pressed="false">Random</button>
+        </div>
+      </div>
+
+      <main class="play" id="game" role="tabpanel" aria-labelledby="tab-character" tabindex="-1">
+        <div class="skeleton" aria-hidden="true"></div>
+        <noscript>
+          <div class="state-panel">
+            <h2>JavaScript is needed</h2>
+            <p>Sekaidle runs entirely in your browser, so it needs JavaScript turned on to play.</p>
+          </div>
+        </noscript>
+      </main>
+    </div>
+
+    <footer class="footer">
+      <div class="page">
+        <p>
+          Sekaidle is an unofficial fan project and is not affiliated with SEGA, Colorful Palette or Crypton
+          Future Media. Project Sekai and its characters and artwork belong to their owners.
+        </p>
+        <p>
+          Character and card data come from the community-run
+          <a href="https://github.com/Sekai-World/sekai-master-db-diff">Sekai-World master database</a>. Card
+          art is loaded from a community asset mirror at play time and is not stored in this repository.
+          <span id="data-note"></span>
+        </p>
+        <p><a id="source-link" href="https://github.com/">Source code</a></p>
+      </div>
+    </footer>
+
+    <dialog id="dlg-help" aria-labelledby="dlg-help-title">
+      <div class="dialog-head">
+        <h2 id="dlg-help-title">How to play</h2>
+        <button class="icon-btn" type="button" data-close aria-label="Close">
+          <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg>
+        </button>
+      </div>
+      <div class="dialog-body" id="help-body"></div>
+    </dialog>
+
+    <dialog id="dlg-stats" aria-labelledby="dlg-stats-title">
+      <div class="dialog-head">
+        <h2 id="dlg-stats-title">Your statistics</h2>
+        <button class="icon-btn" type="button" data-close aria-label="Close">
+          <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg>
+        </button>
+      </div>
+      <div class="dialog-body" id="stats-body"></div>
+    </dialog>
+
+    <div id="live" class="sr-only" role="status" aria-live="polite"></div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
