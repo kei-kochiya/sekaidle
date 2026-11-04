@@ -65,6 +65,19 @@ export function mountCardGame(root, ctx) {
   let session = ensureSession({ game: 'card', mode, dateKey, createAnswer });
   // The saved answer wins over today's pool, so a data refresh never changes a puzzle mid-game.
   let answerCard = cardById.get(session.answer) ?? cardById.get(createAnswer().answer);
+  // Thumbnails show the same art variant as the puzzle, so a trained puzzle is compared with
+  // trained faces. A trained-only card has no other variant; the fallback covers a missing file.
+  const cardAvatar = (card, size) => {
+    const trained = card.trainedOnly || session.trained;
+    return createAvatar({
+      src: images.thumb(card.b, trained),
+      fallback: card.trainedOnly ? null : images.thumb(card.b, !trained),
+      initial: card.character.short[0],
+      color: UNITS[card.unit].color,
+      size,
+    });
+  };
+
   let selectedId = null;
   let busy = false;
   let countdown = null;
@@ -303,12 +316,7 @@ export function mountCardGame(root, ctx) {
               dataset: { id: card.id },
               onclick: () => select(card.id),
             },
-            createAvatar({
-              src: images.thumb(card.b, card.trainedOnly),
-              initial: card.character.short[0],
-              color: UNITS[card.unit].color,
-              size: 48,
-            }),
+            cardAvatar(card, 48),
             h(
               'span',
               { class: 'card-opt-text' },
@@ -352,12 +360,7 @@ export function mountCardGame(root, ctx) {
     input.value = label(card);
     submit.disabled = false;
     lead.replaceChildren(
-      createAvatar({
-        src: images.thumb(card.b, card.trainedOnly),
-        initial: card.character.short[0],
-        color: UNITS[card.unit].color,
-        size: 28,
-      }),
+      cardAvatar(card, 28),
     );
     setOpen(false);
     announce(`${card.n}, ${card.character.name}, selected. Press Guess to submit.`);
@@ -436,12 +439,7 @@ export function mountCardGame(root, ctx) {
       h(
         'div',
         { class: 'row-card-head', 'aria-hidden': 'true' },
-        createAvatar({
-          src: images.thumb(card.b, card.trainedOnly),
-          initial: card.character.short[0],
-          color: UNITS[card.unit].color,
-          size: 44,
-        }),
+        cardAvatar(card, 44),
         h(
           'div',
           { class: 'row-card-title' },

@@ -153,7 +153,13 @@ if (VERIFY) {
       exists(`${IMG}character/member_small/${c.b}/card_${variant}.png`),
     ]);
     let trainedOk = true;
-    if (!c.t) trainedOk = await exists(`${IMG}character/member_small/${c.b}/card_after_training.png`);
+    if (!c.t) {
+      const [trainedArt, trainedThumb] = await Promise.all([
+        exists(`${IMG}character/member_small/${c.b}/card_after_training.png`),
+        exists(`${IMG}thumbnail/chara/${c.b}_after_training.png`),
+      ]);
+      trainedOk = trainedArt && trainedThumb;
+    }
     return { c, ok: thumb && art, trainedOk };
   });
   const deferred = checks.filter((x) => !x.ok).map((x) => x.c.id);

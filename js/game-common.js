@@ -138,7 +138,8 @@ export async function revealTiles(tiles, { stagger = 190, duration = 520, reduce
  * A square face with a coloured ring. The initial sits underneath the image so a
  * blocked or missing image degrades to a tidy placeholder instead of a broken icon.
  */
-export function createAvatar({ src, initial, color, size = 48, label }) {
+export function createAvatar({ src, fallback, initial, color, size = 48, label }) {
+  let retried = false;
   const img = h('img', {
     src,
     alt: '',
@@ -147,7 +148,15 @@ export function createAvatar({ src, initial, color, size = 48, label }) {
     loading: 'lazy',
     decoding: 'async',
     referrerpolicy: 'no-referrer',
-    onerror: () => img.remove(),
+    onerror: () => {
+      // Try the fallback image once (e.g. the other art variant) before settling for the initial.
+      if (fallback && !retried) {
+        retried = true;
+        img.src = fallback;
+      } else {
+        img.remove();
+      }
+    },
   });
   return h(
     'span',

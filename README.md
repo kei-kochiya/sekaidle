@@ -45,6 +45,7 @@ Card art and face thumbnails are loaded in the player's browser from the communi
 - Daily cards are drawn only from cards released at least 14 days before that day. That keeps the weekly data refresh from reshuffling a day's puzzle; new cards join the daily rotation after the delay (they are in Random mode immediately).
 - Birthdays have no year in the game, so they are compared by month and day only.
 - Ena's night-school classes and Kamiyama High School count as the same school; Virtual Singers have no school (and match each other).
+- The art is untrained or trained at random (always trained for the few cards that only have trained art), and the card thumbnails in the picker and guess list show the same variant.
 - Only the exact card wins in Card mode. Matching all three tiles means the right character, attribute and group, but a different card.
 
 ## Project layout
