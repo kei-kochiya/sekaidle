@@ -3,7 +3,7 @@
 import { h, icon, announce, prefersReducedMotion, sleep } from './dom.js';
 import { UNITS, UNIT_ORDER, ATTRIBUTES, ATTRIBUTE_ORDER, images } from './data.js';
 import { MAX_GUESSES } from './store.js';
-import { pickDaily, dailyCoin, puzzleNumber } from './rng.js';
+import { pickDaily, dailyCoin, puzzleNumber, epochDay } from './rng.js';
 import {
   ensureSession,
   resetRandomSession,
@@ -29,6 +29,9 @@ const ZOOM = [1.3, 1.2, 1.12, 1.07, 1.03, 1.01];
 
 const PAGE_SIZE = 40;
 
+/** New cards join the daily rotation this many days after release (see createAnswer). */
+const DAILY_DELAY_DAYS = 14;
+
 /** Group means the unit; any Virtual Singer counts as "Virtual Singer", whichever unit's version of the card it is. */
 export function compareCards(guess, answer) {
   return {
@@ -45,11 +48,17 @@ export function mountCardGame(root, ctx) {
   const sorted = cards.slice().sort((a, b) => b.d - a.d || b.id - a.id);
 
   const createAnswer = () => {
-    const ids = cards.map((c) => c.id).sort((a, b) => a - b);
+    // The daily answer only comes from cards released at least DAILY_DELAY_DAYS before the puzzle
+    // date. The data refreshes weekly, so a refresh can only ever add cards newer than that
+    // window, and the pool (and therefore every day's answer) stays put for everyone.
+    const eligible =
+      mode === 'daily' ? cards.filter((c) => c.d <= epochDay(dateKey) - DAILY_DELAY_DAYS) : cards;
+    const ids = (eligible.length ? eligible : cards).map((c) => c.id).sort((a, b) => a - b);
     const answer =
       mode === 'daily' ? pickDaily('card', ids, dateKey) : ids[Math.floor(Math.random() * ids.length)];
     const card = cardById.get(answer);
-    const trained = card.trainedOnly || (mode === 'daily' ? dailyCoin('card', dateKey) : Math.random() < 0.5);
+    const coin = mode === 'daily' ? dailyCoin('card', dateKey) : Math.random() < 0.5;
+    const trained = card.trainedOnly || (coin && !card.nt);
     return { answer, trained };
   };
 

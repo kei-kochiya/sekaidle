@@ -9,7 +9,7 @@
  * The game only needs a handful of fields, so the multi-megabyte upstream files
  * are boiled down to ~100 KB of JSON that the browser can load in one request.
  */
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -103,6 +103,17 @@ const [jpCards, enCards, enChars, enProfiles, charUnits] = await Promise.all([
 const enPrefix = new Map(enCards.filter((c) => c.prefix).map((c) => [c.id, c.prefix]));
 const now = Date.now();
 
+async function readPrevious(file) {
+  try {
+    return JSON.parse(await readFile(path.join(ROOT, file), 'utf8'));
+  } catch {
+    return null; // first run, or the file was deleted: rebuild everything
+  }
+}
+const previousCards = await readPrevious('data/cards.json');
+const previousChars = await readPrevious('data/characters.json');
+const known = new Map((previousCards?.cards ?? []).map((c) => [c.id, c]));
+
 /* ---------- cards ---------- */
 let cards = jpCards
   .filter(
@@ -129,8 +140,13 @@ let cards = jpCards
   });
 
 if (VERIFY) {
-  console.log(`Checking ${cards.length} cards for art on the image CDN…`);
-  const checks = await pool(cards, 8, async (c) => {
+  // Cards already in data/cards.json were checked when they were added. Re-checking them on every
+  // run would let one flaky CDN response drop a card, and the daily puzzle is picked from the
+  // whole pool, so that would reshuffle it. Only newcomers are checked; one whose art isn't online
+  // yet is deferred to the next run instead of being added broken.
+  const fresh = cards.filter((c) => !known.has(c.id));
+  console.log(`Checking ${fresh.length} new card(s) for art on the image CDN…`);
+  const checks = await pool(fresh, 8, async (c) => {
     const variant = c.t ? 'after_training' : 'normal';
     const [thumb, art] = await Promise.all([
       exists(`${IMG}thumbnail/chara/${c.b}_${variant}.png`),
@@ -140,12 +156,13 @@ if (VERIFY) {
     if (!c.t) trainedOk = await exists(`${IMG}character/member_small/${c.b}/card_after_training.png`);
     return { c, ok: thumb && art, trainedOk };
   });
-  const missing = checks.filter((x) => !x.ok);
-  const noTrained = checks.filter((x) => x.ok && !x.trainedOk).map((x) => x.c.id);
-  if (missing.length) console.log('Dropping cards without art:', missing.map((x) => x.c.id).join(', '));
-  cards = checks.filter((x) => x.ok).map((x) => x.c);
-  for (const c of cards) if (noTrained.includes(c.id)) c.nt = 1; // no trained art available
-  console.log(`${cards.length} cards verified; ${noTrained.length} without trained art.`);
+  const deferred = checks.filter((x) => !x.ok).map((x) => x.c.id);
+  const noTrained = new Set(checks.filter((x) => x.ok && !x.trainedOk).map((x) => x.c.id));
+  if (deferred.length) console.log('Deferring cards whose art is not online yet:', deferred.join(', '));
+  cards = cards.filter((c) => known.has(c.id) || !deferred.includes(c.id));
+  for (const c of cards) {
+    if (noTrained.has(c.id) || known.get(c.id)?.nt) c.nt = 1; // no trained art available
+  }
 }
 
 /* ---------- characters ---------- */
@@ -182,6 +199,17 @@ for (const ch of characters) {
   if (!Number.isFinite(ch.height)) throw new Error(`Bad height for ${ch.name}`);
   if (!ch.avatar) throw new Error(`No avatar card for ${ch.name}`);
 }
+
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+if (previousCards && previousChars && sameJson(previousCards.cards, cards) && sameJson(previousChars, characters)) {
+  console.log(
+    `Data is already up to date (${cards.length} cards, latest release ${previousCards.meta.latestCard}).`,
+  );
+  process.exit(0);
+}
+const added = cards.filter((c) => !known.has(c.id));
+const removed = [...known.keys()].filter((id) => !cards.some((c) => c.id === id));
+if (previousCards) console.log(`Added ${added.length} card(s), removed ${removed.length}.`);
 
 const latest = Math.max(...cards.map((c) => c.d));
 const meta = {

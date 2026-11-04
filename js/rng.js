@@ -41,6 +41,12 @@ export function dateKey(date = new Date()) {
 
 const EPOCH = Date.UTC(2026, 10, 4); // puzzle #1 = 4 Nov 2026
 
+/** Whole days since 1970-01-01 (UTC) for a YYYY-MM-DD key; matches the card release-day numbers in the data. */
+export function epochDay(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86400000);
+}
+
 /** Puzzle number for a date key (1-based, DST-proof). */
 export function puzzleNumber(key) {
   const [y, m, d] = key.split('-').map(Number);
