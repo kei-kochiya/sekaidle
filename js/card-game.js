@@ -81,6 +81,7 @@ export function mountCardGame(root, ctx) {
       : 'untrained'
     : store.getPref('cardArt', 'untrained');
   const artFor = (card) => card.trainedOnly || artMode === 'trained';
+  let view = store.getPref('cardView', 'large');
 
   // Sessions saved before guesses carried their art were shown the puzzle's art, so they match it.
   const guessTrained = (index) =>
@@ -243,7 +244,16 @@ export function mountCardGame(root, ctx) {
     h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by group' }, unitChips),
   );
   const count = h('p', { class: 'results-count', 'aria-live': 'polite' });
-  const list = h('ul', { class: 'card-list', 'aria-label': 'Cards' });
+  const list = h('ul', { 'aria-label': 'Cards' });
+  const viewToggle = h('button', {
+    class: 'btn btn-quiet view-toggle',
+    type: 'button',
+    onclick: () => {
+      view = view === 'large' ? 'compact' : 'large';
+      store.setPref('cardView', view);
+      renderList();
+    },
+  });
   const more = h(
     'button',
     {
@@ -257,7 +267,15 @@ export function mountCardGame(root, ctx) {
     'Show more cards',
   );
   const none = h('p', { class: 'empty', hidden: true }, 'No card matches. Try fewer words or clear a filter.');
-  const results = h('div', { id: 'card-results', class: 'picker-results' }, filters, count, list, none, more);
+  const results = h(
+    'div',
+    { id: 'card-results', class: 'picker-results' },
+    filters,
+    h('div', { class: 'results-head' }, count, viewToggle),
+    list,
+    none,
+    more,
+  );
 
   // Which art the next guess is made with. It lives outside the list so it stays reachable
   // after a card is chosen and the list has closed.
@@ -359,45 +377,96 @@ export function mountCardGame(root, ctx) {
     const all = matching();
     const guessed = guessedKeys();
     const shown = all.slice(0, state.limit);
+    const next = view === 'large' ? 'compact' : 'large';
+    viewToggle.replaceChildren(icon(next === 'large' ? 'cards' : 'list', { size: 16 }), next === 'large' ? 'Large' : 'Compact');
+    list.className = view === 'large' ? 'card-grid' : 'card-list';
     list.replaceChildren(
       ...shown.map((card) => {
         const trained = artFor(card);
         const done = guessed.has(guessKey(card.id, trained));
-        return h(
-          'li',
-          {},
-          h(
-            'button',
-            {
-              type: 'button',
-              class: 'card-opt',
-              'aria-pressed': String(card.id === selectedId),
-              disabled: done,
-              dataset: { id: card.id },
-              onclick: () => select(card.id),
-            },
-            cardAvatar(card, 48, trained),
-            h(
-              'span',
-              { class: 'card-opt-text' },
-              h('span', { class: 'card-opt-name', lang: card.jp ? 'ja' : null }, card.n),
-              h(
-                'span',
-                { class: 'card-opt-sub' },
-                card.character.short,
-                ' · ',
-                cardMeta(card),
-                h('span', { class: 'art-tag' }, card.trainedOnly ? 'Trained only' : artWord(trained)),
-              ),
-            ),
-            done && h('span', { class: 'card-opt-done' }, 'Guessed'),
-          ),
-        );
+        return h('li', {}, (view === 'large' ? cardTile : cardRow)(card, trained, done));
       }),
     );
     more.hidden = all.length <= shown.length;
     none.hidden = all.length > 0;
     count.textContent = all.length === cards.length ? `${cards.length} cards` : `${plural(all.length, 'card')} found`;
+  }
+
+  function cardRow(card, trained, done) {
+    return h(
+      'button',
+      {
+        type: 'button',
+        class: 'card-opt',
+        'aria-pressed': String(card.id === selectedId),
+        disabled: done,
+        dataset: { id: card.id },
+        onclick: () => select(card.id),
+      },
+      cardAvatar(card, 48, trained),
+      h(
+        'span',
+        { class: 'card-opt-text' },
+        h('span', { class: 'card-opt-name', lang: card.jp ? 'ja' : null }, card.n),
+        h(
+          'span',
+          { class: 'card-opt-sub' },
+          card.character.short,
+          ' · ',
+          cardMeta(card),
+          h('span', { class: 'art-tag' }, card.trainedOnly ? 'Trained only' : artWord(trained)),
+        ),
+      ),
+      done && h('span', { class: 'card-opt-done' }, 'Guessed'),
+    );
+  }
+
+  function cardTile(card, trained, done) {
+    const attr = ATTRIBUTES[card.at];
+    const unit = UNITS[card.unit];
+    const art = card.trainedOnly ? 'Trained only' : artWord(trained);
+    return h(
+      'button',
+      {
+        type: 'button',
+        class: 'card-tile',
+        'aria-pressed': String(card.id === selectedId),
+        'aria-label': `${card.n}, ${card.character.short}, ${attr.label}, ${unit.short}, ${card.r} star, ${art}${done ? ', Guessed' : ''}`,
+        disabled: done,
+        dataset: { id: card.id },
+        onclick: () => select(card.id),
+      },
+      h('img', {
+        src: images.art(card.b, trained),
+        alt: '',
+        loading: 'lazy',
+        decoding: 'async',
+        referrerpolicy: 'no-referrer',
+        draggable: 'false',
+        width: 940,
+        height: 530,
+      }),
+      h(
+        'span',
+        { class: 'tile-top' },
+        h('span', { class: 'tile-badge', style: { '--tone': attr.color } }, icon(attr.icon, { size: 15 }), attr.label),
+        h('span', { class: 'tile-badge', style: { '--tone': unit.color } }, h('span', { class: 'chip-dot' }), unit.short),
+        h('span', { class: 'tile-badge tile-stars' }, Array.from({ length: card.r }, () => icon('star', { size: 13 }))),
+      ),
+      h(
+        'span',
+        { class: 'tile-foot' },
+        h('span', { class: 'tile-name', lang: card.jp ? 'ja' : null }, card.n),
+        h(
+          'span',
+          { class: 'tile-sub' },
+          card.character.short,
+          h('span', { class: 'tile-art' }, art),
+          h('span', { class: 'tile-pick' }, icon('check', { size: 16 })),
+        ),
+      ),
+      done && h('span', { class: 'tile-done' }, h('span', { class: 'tile-badge' }, icon('check', { size: 15 }), 'Guessed')),
+    );
   }
 
   function cardMeta(card) {
@@ -414,7 +483,7 @@ export function mountCardGame(root, ctx) {
 
   function select(id) {
     selectedId = id;
-    for (const button of list.querySelectorAll('.card-opt')) {
+    for (const button of list.querySelectorAll('button[data-id]')) {
       button.setAttribute('aria-pressed', String(Number(button.dataset.id) === id));
     }
     if (id == null) {
