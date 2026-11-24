@@ -37,7 +37,7 @@ The only guessing game built around Project Sekai's own structure: units, school
 
 - Six guesses per puzzle in both games.
 - Character hints: school, birthday (month and day only, since the game gives no year), height in cm.
-- Card pool: 3-star and 4-star cards (990 at time of writing); birthday and lower rarities excluded. Cards with only a Japanese title are shown with it.
+- Card pool: 3-star and 4-star cards (994 at time of writing); birthday and lower rarities excluded. Cards with only a Japanese title are shown with it.
 - Group means unit. Virtual Singers have no school and one shared group regardless of which unit's version of the card it is.
 - Third-party art hosting is outside our control; the game degrades to initials and a retry state if images fail.
 
@@ -45,7 +45,7 @@ The only guessing game built around Project Sekai's own structure: units, school
 
 - Name: Sekaidle.
 - Unofficial fan project. Not affiliated with SEGA, Colorful Palette or Crypton Future Media; the footer says so.
-- The six unit colours (Leo/need, MORE MORE JUMP!, Vivid BAD SQUAD, Wonderlands×Showtime, Nightcord at 25:00, Virtual Singer) are the only saturated colours in the interface besides feedback states.
+- The six unit colours (Leo/need, MORE MORE JUMP!, Vivid BAD SQUAD, Wonderlands×Showtime, Nightcord at 25:00, Virtual Singer) and the five card attributes are the only saturated colours in the interface besides feedback states.
 
 ## Evidence on Hand
 
@@ -64,5 +64,5 @@ The only guessing game built around Project Sekai's own structure: units, school
 
 - WCAG 2.2 AA contrast for text and UI boundaries, in both themes.
 - Full keyboard play (type, Enter to select, Enter to guess), screen-reader announcements for every result, respects `prefers-reduced-motion` and the system colour scheme.
-- Touch targets of 44px or more for primary controls.
+- Touch targets of 44px or more on touch (`pointer: coarse`) devices, and 48px primary controls across all viewports.
 - Names and card titles may be Japanese; `lang="ja"` is set where the title is untranslated.

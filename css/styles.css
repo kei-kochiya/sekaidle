@@ -40,7 +40,7 @@
   --surface-2: light-dark(oklch(0.952 0.012 275), oklch(0.295 0.036 275));
   --surface-3: light-dark(oklch(0.92 0.016 275), oklch(0.345 0.04 275));
   --line: light-dark(oklch(0.89 0.014 275), oklch(0.37 0.04 275));
-  /* Boundaries of inputs and chips: 3:1 against both surface and page. */
+  /* Boundaries of inputs and chips: >= 3:1 against both surface and page. */
   --line-strong: light-dark(oklch(0.64 0.035 275), oklch(0.56 0.05 275));
 
   /* Text */
@@ -57,13 +57,36 @@
   --hint: light-dark(oklch(0.85 0.15 85), oklch(0.82 0.15 85));
   --hint-ink: oklch(0.24 0.05 85);
 
+  /* Canonical unit colours (top rail & swatches) */
+  --unit-leo-need: #4455dd;
+  --unit-mmj: #88dd44;
+  --unit-vbs: #ee1166;
+  --unit-wxs: #ff9900;
+  --unit-n25: #884499;
+  --unit-vs: #33ccbb;
+
+  /* Attribute icon tokens tuned to >= 3:1 contrast against both light and dark surfaces */
+  --attr-cute: light-dark(oklch(0.56 0.2 355), oklch(0.74 0.17 355));
+  --attr-cool: light-dark(oklch(0.55 0.17 258), oklch(0.72 0.15 258));
+  --attr-pure: light-dark(oklch(0.55 0.16 145), oklch(0.74 0.16 145));
+  --attr-happy: light-dark(oklch(0.56 0.15 68), oklch(0.78 0.15 75));
+  --attr-mysterious: light-dark(oklch(0.54 0.17 305), oklch(0.74 0.15 305));
+
+  /* Shadows & overlays */
+  --shadow-lift: oklch(0.2 0.05 275 / 0.18);
+  --shadow-dialog: oklch(0.15 0.05 275 / 0.5);
+  --shadow-dialog-edge: oklch(0.15 0.05 275 / 0.2);
+  --backdrop: color-mix(in oklch, oklch(0.18 0.05 275) 55%, transparent);
+  --marker-rim: light-dark(oklch(0.24 0.04 275 / 0.36), oklch(0.96 0.01 275 / 0.36));
+
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
+  --radius-xs: 3px;
   --radius-s: 10px;
   --radius-m: 14px;
   --radius-l: 18px;
   --radius-xl: 24px;
-  --radius-xs: 3px;
+  --radius-pill: 999px;
 }
 
 :root[data-theme="light"] {
@@ -86,6 +109,7 @@
 }
 
 html {
+  overflow-x: clip;
   -webkit-text-size-adjust: 100%;
   scrollbar-color: var(--line-strong) transparent;
   scrollbar-width: thin;
@@ -94,6 +118,7 @@ html {
 body {
   margin: 0;
   min-height: 100dvh;
+  overflow-x: clip;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -210,20 +235,26 @@ input {
 .rail i {
   flex: 1;
   margin-inline: -4px;
-  transform: skewX(-40deg);
+  transform: skewX(-24deg);
 }
-.rail i:nth-child(1) { background: #4455dd; }
-.rail i:nth-child(2) { background: #88dd44; }
-.rail i:nth-child(3) { background: #ee1166; }
-.rail i:nth-child(4) { background: #ff9900; }
-.rail i:nth-child(5) { background: #884499; }
-.rail i:nth-child(6) { background: #33ccbb; }
+.rail i:nth-child(1) { background: var(--unit-leo-need); }
+.rail i:nth-child(2) { background: var(--unit-mmj); }
+.rail i:nth-child(3) { background: var(--unit-vbs); }
+.rail i:nth-child(4) { background: var(--unit-wxs); }
+.rail i:nth-child(5) { background: var(--unit-n25); }
+.rail i:nth-child(6) { background: var(--unit-vs); }
 
 .topbar-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-height: 3.5rem;
+}
+
+.brand {
+  margin: 0;
+  font: inherit;
+  line-height: 1;
 }
 
 .wordmark {
@@ -259,7 +290,7 @@ input {
   background: var(--surface-3);
 }
 
-/* ---------- game switcher ---------- */
+/* ---------- game switcher & segmented pills ---------- */
 
 .tabs {
   display: grid;
@@ -277,7 +308,7 @@ input {
   border-radius: var(--radius-m);
   background: var(--surface);
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 .tab strong {
   font-size: 1rem;
@@ -301,9 +332,10 @@ input {
 
 .modebar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.5rem 0.75rem;
   margin-block: 1rem 0.875rem;
 }
 .mode-info {
@@ -317,27 +349,53 @@ input {
 
 .seg {
   display: inline-flex;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-2);
+  padding: 0.1875rem;
+  border-radius: var(--radius-pill);
 }
-.seg button {
+.seg-btn {
   min-height: 2.25rem;
-  padding: 0 1rem;
+  padding: 0 0.875rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--ink-2);
   font-size: 0.875rem;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.15s, color 0.15s;
 }
-.seg button[aria-pressed="true"] {
+.seg-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.seg-mode {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.seg-mode .seg-btn {
+  padding-inline: 1rem;
+}
+.seg-mode .seg-btn[aria-pressed="true"] {
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 2px oklch(0.2 0.05 275 / 0.18), 0 0 0 1px var(--line);
+  box-shadow: 0 1px 2px var(--shadow-lift), 0 0 0 1px var(--line);
+}
+
+.seg-art {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+.seg-art .seg-btn {
+  font-size: 0.8125rem;
+}
+.seg-art .seg-btn:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--surface-2);
+}
+.seg-art .seg-btn[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--bg);
 }
 
 /* ---------- play layout ---------- */
@@ -383,6 +441,7 @@ input {
   font-size: 1.375rem;
   font-weight: 700;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 .hero-sub {
   margin-top: 0.125rem;
@@ -415,6 +474,9 @@ input {
   border-radius: var(--radius-l);
   background: var(--surface);
 }
+.hero-body {
+  min-width: 0;
+}
 
 .mystery {
   display: grid;
@@ -438,6 +500,7 @@ input {
 
 .hero-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.875rem;
 }
 
@@ -498,7 +561,7 @@ input {
 /* Guess gauge: slanted bars like a rhythm-game meter. */
 .gauge {
   display: inline-flex;
-  gap: 5px;
+  gap: 0.3125rem;
 }
 .gauge i {
   width: 1.5rem;
@@ -509,7 +572,7 @@ input {
   transition: background-color 0.25s;
 }
 .gauge i.is-used {
-  background: var(--ink-2);
+  background: var(--ink);
 }
 .gauge i.is-hit {
   background: var(--ok);
@@ -575,18 +638,9 @@ input {
 
 /* ---------- picker ---------- */
 
-/* Nested grids need an explicit shrinkable track, or an input's intrinsic width
- * can push the whole column wider than the screen. */
-.picker,
-.history,
-.result,
-.hero-card,
-.stat-block {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .picker {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
 }
 
@@ -659,6 +713,7 @@ input {
   padding: 0.75rem;
   overflow: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
   background: var(--surface);
@@ -698,19 +753,15 @@ input {
   background: transparent;
   font-size: 0.75rem;
   font-weight: 600;
+  user-select: none;
   cursor: pointer;
   transition: background-color 0.15s, border-color 0.15s;
 }
-.char-cell:hover:not(:disabled) {
-  background: var(--surface-2);
-}
-.char-cell[aria-pressed="true"] {
-  border-color: var(--ink);
-  background: var(--surface-2);
-}
-.char-cell:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.char-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .avatar {
@@ -739,6 +790,8 @@ input {
   object-fit: cover;
 }
 
+/* ---------- card filters & options ---------- */
+
 .filters {
   display: grid;
   gap: 0.5rem;
@@ -756,11 +809,12 @@ input {
   min-height: 2.25rem;
   padding: 0 0.75rem;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--ink-2);
   font-size: 0.8125rem;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
@@ -775,6 +829,7 @@ input {
   height: 0.625rem;
   border-radius: var(--radius-xs);
   background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--marker-rim);
   transform: skewX(-24deg);
 }
 .chip[aria-pressed="true"] {
@@ -786,7 +841,6 @@ input {
   color: inherit;
 }
 
-/* Collapsible character filter in Card mode */
 .char-filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -800,10 +854,10 @@ input {
   color: currentColor;
   transition: transform 0.2s var(--ease-out);
 }
-.char-filter-trigger[data-open="true"] .icon {
+.char-filter-trigger[aria-expanded="true"] .icon {
   transform: rotate(180deg);
 }
-.char-filter-trigger.is-selected {
+.char-filter-trigger[data-active="true"] {
   padding-left: 0.375rem;
   border-color: var(--ink);
   background: var(--ink);
@@ -859,7 +913,6 @@ input {
   white-space: nowrap;
 }
 
-/* Which art the next card guess is made with: a joined pair, one always pressed. */
 .art-pick {
   display: flex;
   align-items: center;
@@ -870,41 +923,11 @@ input {
   font-weight: 600;
   color: var(--ink-3);
 }
-.seg {
-  display: inline-flex;
-  padding: 0.1875rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--surface);
-}
-.seg-btn {
-  min-height: 2.25rem;
-  padding: 0 0.875rem;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-}
-.seg-btn:hover:not(:disabled) {
-  background: var(--surface-2);
-}
-.seg-btn[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--bg);
-}
-.seg-btn:disabled {
-  opacity: 0.42;
-  cursor: not-allowed;
-}
 
 .art-tag {
   padding: 0 0.4375rem;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.5;
@@ -934,22 +957,33 @@ input {
   border-radius: var(--radius-m);
   background: transparent;
   text-align: left;
+  user-select: none;
   cursor: pointer;
   transition: background-color 0.15s, border-color 0.15s;
 }
-.card-opt:hover:not(:disabled) {
+.char-cell:hover:not([aria-disabled="true"]),
+.card-opt:hover:not([aria-disabled="true"]) {
   background: var(--surface-2);
 }
-.card-opt[aria-pressed="true"] {
+.char-cell[aria-selected="true"],
+.card-opt[aria-selected="true"] {
   border-color: var(--ink);
   background: var(--surface-2);
 }
-.card-opt:disabled {
-  opacity: 0.5;
+.char-cell.is-active,
+.card-opt.is-active {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  background: var(--surface-2);
+}
+.char-cell[aria-disabled="true"],
+.card-opt[aria-disabled="true"] {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 .card-opt-text {
   display: grid;
+  flex: 1;
   min-width: 0;
 }
 .card-opt-name {
@@ -972,6 +1006,7 @@ input {
   gap: 0.25rem;
 }
 .card-opt-done {
+  flex: none;
   margin-left: auto;
   font-size: 0.75rem;
   font-weight: 600;
@@ -982,6 +1017,7 @@ input {
 
 .history {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.375rem;
   align-content: start;
 }
@@ -1062,9 +1098,6 @@ input {
   font-size: 0.8125rem;
   color: var(--ink-2);
 }
-.row-card-sub .card-opt-meta {
-  gap: 0.25rem;
-}
 .row-card-tiles {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1073,6 +1106,7 @@ input {
 
 .meta-attr {
   display: inline-grid;
+  color: var(--attr);
 }
 
 .tile {
@@ -1081,6 +1115,7 @@ input {
   justify-items: center;
   gap: 0.125rem;
   min-height: 3.75rem;
+  min-width: 0;
   padding: 0.375rem 0.25rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
@@ -1104,6 +1139,7 @@ input {
   align-items: center;
   justify-content: center;
   gap: 0.25rem;
+  min-width: 0;
   max-width: 100%;
   font-stretch: 88%;
   hyphens: manual;
@@ -1125,11 +1161,15 @@ input {
 
 .result {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem;
   padding: 1.25rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
   background: var(--surface);
+}
+.result:focus {
+  outline: none;
 }
 .facts {
   display: grid;
@@ -1171,7 +1211,7 @@ dialog {
   border-radius: var(--radius-xl);
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 28px 70px -20px oklch(0.15 0.05 275 / 0.5), 0 2px 8px oklch(0.15 0.05 275 / 0.2);
+  box-shadow: 0 28px 70px -20px var(--shadow-dialog), 0 2px 8px var(--shadow-dialog-edge);
   overflow: hidden;
 }
 dialog[open] {
@@ -1180,7 +1220,7 @@ dialog[open] {
   animation: dialog-in 0.28s var(--ease-out);
 }
 dialog::backdrop {
-  background: color-mix(in oklch, oklch(0.18 0.05 275) 55%, transparent);
+  background: var(--backdrop);
 }
 .dialog-head {
   display: flex;
@@ -1191,6 +1231,7 @@ dialog::backdrop {
 .dialog-head h2 {
   font-size: 1.25rem;
   font-weight: 700;
+  line-height: 1.25;
 }
 .dialog-body {
   display: grid;
@@ -1198,6 +1239,7 @@ dialog::backdrop {
   padding: 0.5rem 1.5rem 1.5rem;
   overflow: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .dialog-body h3 {
   font-size: 1rem;
@@ -1208,7 +1250,7 @@ dialog::backdrop {
   max-width: 62ch;
   color: var(--ink-2);
 }
-.dialog-body ul {
+.dialog-body ul:not(.legend) {
   display: grid;
   gap: 0.375rem;
   margin: 0;
@@ -1226,9 +1268,6 @@ dialog::backdrop {
   padding: 0;
   list-style: none;
 }
-.dialog-body .legend {
-  padding: 0;
-}
 .legend li {
   display: grid;
   grid-template-columns: 6.5rem minmax(0, 1fr);
@@ -1241,6 +1280,7 @@ dialog::backdrop {
 
 .stat-block {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
 }
 .stat-line {
@@ -1280,7 +1320,7 @@ dialog::backdrop {
   font-variant-numeric: tabular-nums;
 }
 .dist-bar {
-  min-width: 1.75rem;
+  min-width: max(1.75rem, fit-content);
   padding: 0.125rem 0.5rem;
   border-radius: var(--radius-xs);
   background: var(--surface-3);
@@ -1307,6 +1347,7 @@ dialog::backdrop {
 }
 .state-panel h2 {
   font-size: 1.25rem;
+  line-height: 1.25;
 }
 .state-panel p {
   color: var(--ink-2);
@@ -1359,20 +1400,41 @@ dialog::backdrop {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
   .skeleton,
-  .frame-skeleton {
+  .frame-skeleton,
+  .history-list > li.is-new,
+  .mystery.is-revealed,
+  dialog[open] {
     animation: none;
+  }
+  .frame-img {
+    transition: opacity 0.15s;
+  }
+  .field-toggle,
+  .char-filter-trigger .icon {
+    transition: background-color 0.15s, color 0.15s;
+  }
+  .btn {
+    transition: background-color 0.15s, border-color 0.15s;
+  }
+  .btn:active:not(:disabled) {
+    transform: none;
   }
 }
 
-/* ---------- small screens ---------- */
+/* ---------- touch targets & small screens ---------- */
+
+@media (pointer: coarse) {
+  .seg-btn,
+  .chip,
+  .btn-quiet {
+    min-height: 2.75rem;
+  }
+  .field-toggle {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
 
 @media (max-width: 26rem) {
   .history-head,
@@ -1391,14 +1453,19 @@ dialog::backdrop {
     gap: 0.875rem;
     padding: 0.875rem;
   }
-  .mystery,
-  .mystery .avatar {
+  .gauge i {
+    width: 1.25rem;
+  }
+  .mystery {
     width: 4.75rem;
     height: 4.75rem;
+  }
+  .mystery .avatar {
     --size: 4.75rem;
   }
   .btn {
-    padding-inline: 1rem;
+    padding-inline: 0.875rem;
+    max-width: 100%;
   }
   .legend li {
     grid-template-columns: 5.5rem minmax(0, 1fr);

@@ -34,13 +34,13 @@ jobs:
       - name: Commit if anything changed
         id: commit
         run: |
-          if git diff --quiet -- data; then
+          if [ -z "$(git status --porcelain -- data)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Card data is already up to date."
             exit 0
           fi
-          cards=$(node -p "require('./data/cards.json').meta.cards")
-          latest=$(node -p "require('./data/cards.json').meta.latestCard")
+          cards=$(node -e "import('node:fs').then(fs => console.log(JSON.parse(fs.readFileSync('./data/cards.json', 'utf8')).meta.cards))")
+          latest=$(node -e "import('node:fs').then(fs => console.log(JSON.parse(fs.readFileSync('./data/cards.json', 'utf8')).meta.latestCard))")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data

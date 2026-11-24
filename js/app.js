@@ -1,34 +1,45 @@
-/* App shell: tabs, daily/random mode, dialogs, theme. */
+/* App shell: tabs, daily/random mode, dialogs, theme, and mount lifecycle. */
 
-import { h, icon, clear } from './dom.js';
+import { h, icon, announce, cancelAnnouncement } from './dom.js';
 import { loadData } from './data.js';
-import { store, MAX_GUESSES } from './store.js';
+import { store } from './store.js';
 import { dateKey as todayKey, puzzleNumber, formatDateKey } from './rng.js';
 import { mountCharacterGame } from './character-game.js';
 import { mountCardGame } from './card-game.js';
 import { createTile } from './game-common.js';
-
-const REPO_URL = 'https://github.com/kei-kochiya/sekaidle';
 
 const GAMES = {
   character: { label: 'Character', mount: mountCharacterGame },
   card: { label: 'Card', mount: mountCardGame },
 };
 
+const THEME_COLORS = {
+  light: '#f4f5fb',
+  dark: '#101321',
+};
+
+const isValidGame = (name) => typeof name === 'string' && Object.hasOwn(GAMES, name);
+const isValidMode = (name) => name === 'daily' || name === 'random';
+
 const $ = (selector) => document.querySelector(selector);
 const root = $('#game');
 
 let data = null;
 let running = null;
+let activeController = null;
+let booting = false;
+
 let game = gameFromHash() ?? store.getPref('game', 'character');
+if (!isValidGame(game)) game = 'character';
+
 let mode = store.getPref('mode', 'daily');
+if (!isValidMode(mode)) mode = 'daily';
+
 let today = todayKey();
 
-if (!GAMES[game]) game = 'character';
-
 function gameFromHash() {
-  const name = location.hash.replace('#', '');
-  return GAMES[name] ? name : null;
+  const name = location.hash.replace(/^#/, '');
+  return isValidGame(name) ? name : null;
 }
 
 /* ---------- chrome ---------- */
@@ -52,43 +63,61 @@ function syncChrome() {
   );
 }
 
-function render() {
+function render({ focusRoot = false } = {}) {
+  const hadFocusInGame = root.contains(document.activeElement);
+  activeController?.abort();
+  activeController = new AbortController();
+  cancelAnnouncement();
   running?.destroy();
   running = null;
+
   syncChrome();
   if (!data) return;
+
   const ctx = {
     data,
     mode,
     dateKey: today,
+    signal: activeController.signal,
     refresh: () => {
       today = todayKey();
-      render();
+      render({ focusRoot: true });
+    },
+    rolloverIfStale: () => {
+      const nowKey = todayKey();
+      if (nowKey === today) return false;
+      today = nowKey;
+      render({ focusRoot: true });
+      announce("Midnight passed. Loaded today's puzzle.");
+      return true;
     },
     playRandom: () => setMode('random'),
     openStats,
   };
+
   running = GAMES[game].mount(root, ctx);
+  if (focusRoot || hadFocusInGame) {
+    root.focus({ preventScroll: true });
+  }
 }
 
-function setGame(next, { focus = false } = {}) {
-  if (next === game) return;
+function setGame(next, { focusTab = false } = {}) {
+  if (!isValidGame(next) || next === game) return;
   game = next;
   store.setPref('game', game);
   history.replaceState(null, '', `#${game}`);
   render();
-  if (focus) $(`#tab-${game}`).focus();
+  if (focusTab) $(`#tab-${game}`).focus();
 }
 
 function setMode(next) {
-  if (next === mode) return;
+  if (!isValidMode(next) || next === mode) return;
   mode = next;
   store.setPref('mode', mode);
-  render();
-  root.focus({ preventScroll: true });
+  render({ focusRoot: true });
 }
 
-/* ---------- tabs and mode switch ---------- */
+/* ---------- tabs, mode switch & date rollover ---------- */
 
 for (const key of Object.keys(GAMES)) {
   $(`#tab-${key}`).addEventListener('click', () => setGame(key));
@@ -104,7 +133,7 @@ $('.tabs').addEventListener('keydown', (event) => {
   if (event.key === 'End') next = keys[keys.length - 1];
   if (next) {
     event.preventDefault();
-    setGame(next, { focus: true });
+    setGame(next, { focusTab: true });
   }
 });
 
@@ -116,34 +145,61 @@ window.addEventListener('hashchange', () => {
   if (next) setGame(next);
 });
 
-// Left the tab open past midnight? Roll the daily puzzle over when they come back.
-document.addEventListener('visibilitychange', () => {
+function checkMidnightRollover() {
   if (document.visibilityState === 'visible' && todayKey() !== today) {
     today = todayKey();
     render();
   }
-});
+}
+
+document.addEventListener('visibilitychange', checkMidnightRollover);
+window.addEventListener('focus', checkMidnightRollover);
 
 /* ---------- theme ---------- */
 
+const systemDarkMq = window.matchMedia('(prefers-color-scheme: dark)');
+
 function effectiveTheme() {
-  return (
-    document.documentElement.dataset.theme ||
-    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-  );
+  const explicit = document.documentElement.dataset.theme;
+  if (explicit === 'light' || explicit === 'dark') return explicit;
+  return systemDarkMq.matches ? 'dark' : 'light';
+}
+
+function syncThemeChrome() {
+  const current = effectiveTheme();
+  const btn = $('#btn-theme');
+  btn.setAttribute('aria-pressed', String(current === 'dark'));
+  btn.setAttribute('aria-label', `Switch to ${current === 'dark' ? 'light' : 'dark'} theme`);
+  const metaTheme = $('#meta-theme-color');
+  if (metaTheme) metaTheme.setAttribute('content', THEME_COLORS[current]);
 }
 
 $('#btn-theme').addEventListener('click', () => {
   const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   store.setPref('theme', next);
+  syncThemeChrome();
+  announce(`Switched to ${next} theme.`);
 });
+
+systemDarkMq.addEventListener('change', syncThemeChrome);
+syncThemeChrome();
 
 /* ---------- dialogs ---------- */
 
 for (const dialog of document.querySelectorAll('dialog')) {
+  let pointerDownTarget = null;
+  dialog.addEventListener('pointerdown', (event) => {
+    pointerDownTarget = event.target;
+  });
   dialog.addEventListener('click', (event) => {
-    if (event.target === dialog || event.target.closest('[data-close]')) dialog.close();
+    if (event.target.closest('[data-close]')) {
+      dialog.close();
+      return;
+    }
+    if (event.target === dialog && pointerDownTarget === dialog) {
+      dialog.close();
+    }
   });
 }
 
@@ -177,7 +233,7 @@ function buildHelp() {
       h(
         'p',
         {},
-        'Birthdays are compared by month and day only, since the game gives no year. Virtual Singers have no school.',
+        'Birthdays are compared by month and day only, since the game gives no year. Kamiyama night classes count as Kamiyama High School, Kanade attends Correspondence School, and Virtual Singers have no school.',
       ),
     ),
     h(
@@ -188,10 +244,22 @@ function buildHelp() {
         'ul',
         {},
         h('li', {}, 'You see a 3 or 4-star card, heavily blurred. Every wrong guess sharpens it.'),
-        h('li', {}, 'Each guess is a card and the art you pick for it, Untrained or Trained. Four tiles say what matches the answer: attribute, group, character and art.'),
-        h('li', {}, 'The puzzle shows either the untrained or the trained art of its card, and the art tile is how you find out which. It also moves the Art switch to the answer’s art for you.'),
+        h(
+          'li',
+          {},
+          'Filter candidates by attribute, group or character, and pick Untrained or Trained art. Four tiles say what matches the answer: attribute, group, character and art.',
+        ),
+        h(
+          'li',
+          {},
+          'The puzzle shows either the untrained or the trained art of its card (single-art cards automatically clamp to the art they have). After a guess, the Art switch aligns to the puzzle’s art.',
+        ),
         h('li', {}, 'Group means the unit. A Virtual Singer counts as Virtual Singer, whatever unit the card is for.'),
-        h('li', {}, 'Only the exact card in the exact art wins. The right card in the other art counts as a miss, but you will be told so. If the first three tiles match on a different card, it is the right character and attribute, so let the art decide.'),
+        h(
+          'li',
+          {},
+          'Only the exact card in the exact art wins. The right card in the other art counts as a miss, and a note says so. Matching the first three tiles on a different card means the right character, attribute and group, so let the art decide.',
+        ),
       ),
     ),
   ];
@@ -244,8 +312,12 @@ function statBlock(key) {
 }
 
 function openStats() {
-  const body = clear($('#stats-body'));
-  body.append(statBlock('character'), statBlock('card'), h('p', {}, 'Only daily puzzles count toward your stats. They are saved in this browser.'));
+  const body = $('#stats-body');
+  body.replaceChildren(
+    statBlock('character'),
+    statBlock('card'),
+    h('p', {}, 'Only daily puzzles count toward your stats. They are saved in this browser.'),
+  );
   $('#dlg-stats').showModal();
 }
 
@@ -254,30 +326,46 @@ $('#btn-stats').addEventListener('click', openStats);
 
 /* ---------- boot ---------- */
 
-$('#source-link').href = REPO_URL;
-
 function showError(error) {
   console.error(error);
+  const retryLabel = h('span', {}, 'Try again');
+  const retryBtn = h(
+    'button',
+    {
+      class: 'btn btn-primary',
+      type: 'button',
+      onclick: () => {
+        retryBtn.disabled = true;
+        retryLabel.textContent = 'Loading…';
+        boot({ focusRoot: true });
+      },
+    },
+    icon('refresh'),
+    retryLabel,
+  );
   root.replaceChildren(
     h(
       'div',
       { class: 'state-panel' },
       h('h2', {}, "Couldn't load the game data"),
       h('p', {}, 'Check your connection and try again.'),
-      h('button', { class: 'btn btn-primary', type: 'button', onclick: boot }, icon('refresh'), 'Try again'),
+      retryBtn,
     ),
   );
 }
 
-async function boot() {
+async function boot({ focusRoot = false } = {}) {
+  if (booting) return;
+  booting = true;
   try {
     data = await loadData();
+    $('#data-note').textContent = `Data updated ${data.meta.built}, up to the card released ${data.meta.latestCard}.`;
+    render({ focusRoot });
   } catch (error) {
     showError(error);
-    return;
+  } finally {
+    booting = false;
   }
-  $('#data-note').textContent = `Data updated ${data.meta.built}, up to the card released ${data.meta.latestCard}.`;
-  render();
 }
 
 syncChrome();

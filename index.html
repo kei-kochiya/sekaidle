@@ -8,8 +8,7 @@
       name="description"
       content="Daily Wordle-style puzzles for Project Sekai fans. Name the character from their school, birthday and height, or name the card from blurred art."
     />
-    <meta name="theme-color" content="#f6f5fb" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#16162c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" id="meta-theme-color" content="#f4f5fb" />
     <meta property="og:title" content="Sekaidle" />
     <meta
       property="og:description"
@@ -21,12 +20,18 @@
     <link rel="preload" href="fonts/archivo-var.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="css/styles.css" />
     <script>
-      // Apply a saved theme before first paint so there is no flash.
+      // Apply saved or system theme before first paint so there is no flash.
       try {
-        var saved = JSON.parse(localStorage.getItem("sekaidle:v1") || "{}").prefs;
-        if (saved && (saved.theme === "light" || saved.theme === "dark")) {
-          document.documentElement.dataset.theme = saved.theme;
+        var raw = JSON.parse(localStorage.getItem("sekaidle:v1") || "{}");
+        var saved = raw && typeof raw === "object" && raw.prefs && typeof raw.prefs === "object" ? raw.prefs.theme : null;
+        var theme = saved === "light" || saved === "dark"
+          ? saved
+          : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.dataset.theme = saved;
         }
+        var meta = document.getElementById("meta-theme-color");
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#101321" : "#f4f5fb");
       } catch (e) {}
     </script>
   </head>
@@ -87,7 +92,7 @@
     <header class="topbar">
       <div class="rail" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <div class="page topbar-inner">
-        <a class="wordmark" href="#character" aria-label="Sekaidle, home">Sekaidle</a>
+        <h1 class="brand"><a class="wordmark" href="#character" aria-label="Sekaidle, home">Sekaidle</a></h1>
         <div class="topbar-actions">
           <button class="icon-btn" id="btn-help" type="button" aria-label="How to play" aria-haspopup="dialog">
             <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help" /></svg>
@@ -95,7 +100,7 @@
           <button class="icon-btn" id="btn-stats" type="button" aria-label="Statistics" aria-haspopup="dialog">
             <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chart" /></svg>
           </button>
-          <button class="icon-btn" id="btn-theme" type="button" aria-label="Switch colour theme">
+          <button class="icon-btn" id="btn-theme" type="button" aria-label="Switch to dark theme" aria-pressed="false">
             <svg class="icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-contrast" /></svg>
           </button>
         </div>
@@ -116,20 +121,22 @@
 
       <div class="modebar">
         <p class="mode-info" id="mode-info" aria-live="polite"></p>
-        <div class="seg" role="group" aria-label="Puzzle type">
-          <button type="button" id="mode-daily" aria-pressed="true">Daily</button>
-          <button type="button" id="mode-random" aria-pressed="false">Random</button>
+        <div class="seg seg-mode" role="group" aria-label="Puzzle type">
+          <button type="button" class="seg-btn" id="mode-daily" aria-pressed="true">Daily</button>
+          <button type="button" class="seg-btn" id="mode-random" aria-pressed="false">Random</button>
         </div>
       </div>
 
-      <main class="play" id="game" role="tabpanel" aria-labelledby="tab-character" tabindex="-1">
-        <div class="skeleton" aria-hidden="true"></div>
-        <noscript>
-          <div class="state-panel">
-            <h2>JavaScript is needed</h2>
-            <p>Sekaidle runs entirely in your browser, so it needs JavaScript turned on to play.</p>
-          </div>
-        </noscript>
+      <main id="main-content">
+        <div class="play" id="game" role="tabpanel" aria-labelledby="tab-character" tabindex="-1">
+          <div class="skeleton" aria-hidden="true"></div>
+          <noscript>
+            <div class="state-panel">
+              <h2>JavaScript is needed</h2>
+              <p>Sekaidle runs entirely in your browser, so it needs JavaScript turned on to play.</p>
+            </div>
+          </noscript>
+        </div>
       </main>
     </div>
 

@@ -1,121 +1,103 @@
 /* Card mode: name the card from heavily blurred art; each miss sharpens it. */
 
-import { h, icon, announce, prefersReducedMotion, sleep } from './dom.js';
-import { UNITS, UNIT_ORDER, ATTRIBUTES, ATTRIBUTE_ORDER, images, resolveCardArt } from './data.js';
-import { MAX_GUESSES, store } from './store.js';
-import { pickDaily, dailyCoin, puzzleNumber, epochDay } from './rng.js';
+import { h, icon, announce } from './dom.js';
+import { MAX_GUESSES, UNITS, ATTRIBUTES, images, resolveCardArt } from './data.js';
+import {
+  artWord,
+  cardArtBadgeText,
+  compareCards,
+  filterCards,
+  formatShareText,
+} from './logic.js';
+import { store } from './store.js';
+import { pickDailyCard, dailyCoin, formatEpochDay } from './rng.js';
+import { createPicker } from './picker.js';
+import { createCardFilters } from './card-filters.js';
 import {
   ensureSession,
   resetRandomSession,
   applyGuess,
   forfeit,
+  wrapCross,
+  createGiveUpButton,
   createGauge,
   createTile,
-  revealTiles,
+  executeGuessTurn,
   createAvatar,
-  createShareButton,
-  createCountdown,
+  outcomeStatusText,
+  outcomeAnnouncement,
+  mountResultPanel,
   plural,
   stateWords,
 } from './game-common.js';
 
-/**
- * Blur radius (as a percentage of the frame's width) and zoom for each stage.
- * Stage = number of wrong guesses so far. Zoom hides the soft edges a heavy blur
- * leaves behind, and relaxes toward 1 as the picture sharpens.
- */
 const BLUR = [10, 6.5, 4.2, 2.6, 1.4, 0.7];
 const ZOOM = [1.3, 1.2, 1.12, 1.07, 1.03, 1.01];
-
 const PAGE_SIZE = 40;
-
-/** New cards join the daily rotation this many days after release (see createAnswer). */
 const DAILY_DELAY_DAYS = 14;
+const SEARCH_DEBOUNCE_MS = 120;
 
-const artWord = (trained) => (trained ? 'Trained' : 'Untrained');
-
-function wrapCross(text) {
-  if (typeof text !== 'string' || !text.includes('×')) return text;
-  const [left, ...rest] = text.split('×');
-  return [left, '×', h('wbr'), rest.join('×')];
+// No fallback to the other art on purpose: a "trained" thumbnail must never quietly render untrained.
+function cardAvatar(card, size, trained) {
+  return createAvatar({
+    src: images.thumb(card.asset, trained),
+    initial: card.character.short[0],
+    color: UNITS[card.unit].color,
+    size,
+  });
 }
 
-/**
- * Group means the unit; any Virtual Singer counts as "Virtual Singer", whichever unit's version of the
- * card it is. A guess is a card *and* the art it is shown with, so `art` says whether that art
- * (trained or untrained) is the one the puzzle shows.
- */
-export function compareCards(guess, answer, { guessTrained, answerTrained }) {
-  return {
-    attr: guess.at === answer.at ? 'correct' : 'wrong',
-    group: guess.unit === answer.unit ? 'correct' : 'wrong',
-    character: guess.c === answer.c ? 'correct' : 'wrong',
-    art: guessTrained === answerTrained ? 'correct' : 'wrong',
-  };
+function cardMeta(card) {
+  const attrMeta = ATTRIBUTES[card.attr];
+  return h(
+    'span',
+    { class: 'card-opt-meta' },
+    h('span', { class: 'meta-attr', style: { '--attr': attrMeta.token } }, icon(attrMeta.icon, { size: 14 })),
+    attrMeta.label,
+    ' · ',
+    icon('star', { size: 14 }),
+    card.rarity,
+    h('span', { class: 'sr-only' }, '-star'),
+  );
 }
 
-export function mountCardGame(root, ctx) {
-  const { data, mode, dateKey } = ctx;
-  const { cards, cardById, characters, charById } = data;
-  const reduced = prefersReducedMotion();
-  const sorted = cards.slice().sort((a, b) => b.d - a.d || b.id - a.id);
+function buildCardRow(card, trained, answerCard, answerTrained, { pending }) {
+  const result = compareCards(card, answerCard, { guessTrained: trained, answerTrained });
+  const attrMeta = ATTRIBUTES[card.attr];
+  const tiles = [
+    createTile({
+      kind: 'attr',
+      state: result.attr,
+      value: attrMeta.label,
+      lead: icon(attrMeta.icon, { size: 16 }),
+      pending,
+    }),
+    createTile({ kind: 'group', state: result.group, value: UNITS[card.unit].short, pending }),
+    createTile({ kind: 'character', state: result.character, value: card.character.short, pending }),
+    createTile({ kind: 'art', state: result.art, value: artWord(trained), pending }),
+  ];
+  const row = h(
+    'li',
+    { class: pending ? 'row-card is-new' : 'row-card' },
+    h('span', { class: 'sr-only' }, `${card.name}, ${card.character.name}.`),
+    h(
+      'div',
+      { class: 'row-card-head', 'aria-hidden': 'true' },
+      cardAvatar(card, 44, trained),
+      h(
+        'div',
+        { class: 'row-card-title' },
+        h('strong', { lang: card.isJp ? 'ja' : null }, card.name),
+        h('span', { class: 'row-card-sub' }, card.character.name, ' · ', cardMeta(card)),
+      ),
+    ),
+    h('div', { class: 'row-card-tiles' }, tiles),
+  );
+  return { row, tiles, result };
+}
 
-  const createAnswer = () => {
-    // The daily answer only comes from cards released at least DAILY_DELAY_DAYS before the puzzle
-    // date. The data refreshes weekly, so a refresh can only ever add cards newer than that
-    // window, and the pool (and therefore every day's answer) stays put for everyone.
-    const eligible =
-      mode === 'daily' ? cards.filter((c) => c.d <= epochDay(dateKey) - DAILY_DELAY_DAYS) : cards;
-    const ids = (eligible.length ? eligible : cards).map((c) => c.id).sort((a, b) => a - b);
-    const answer =
-      mode === 'daily' ? pickDaily('card', ids, dateKey) : ids[Math.floor(Math.random() * ids.length)];
-    const card = cardById.get(answer);
-    const coin = mode === 'daily' ? dailyCoin('card', dateKey) : Math.random() < 0.5;
-    const trained = resolveCardArt(card, coin);
-    return { answer, trained };
-  };
-
-  let session = ensureSession({ game: 'card', mode, dateKey, createAnswer });
-  // The saved answer wins over today's pool, so a data refresh never changes a puzzle mid-game.
-  let answerCard = cardById.get(session.answer) ?? cardById.get(createAnswer().answer);
-  // A guess is a card plus the art (trained or untrained) the player picked for it. Whether the
-  // puzzle itself is trained stays hidden until a guess's art tile says so, so thumbnails show the
-  // art the player chose, never the answer's. Single-art cards clamp to the only art they have.
-  let artMode = session.guesses.length
-    ? session.trained
-      ? 'trained'
-      : 'untrained'
-    : store.getPref('cardArt', 'untrained');
-  const artFor = (card) => resolveCardArt(card, artMode === 'trained');
-
-  // Sessions saved before guesses carried their art were shown the puzzle's art, so they match it.
-  const guessTrained = (index) => {
-    const saved = session.arts?.[index];
-    if (saved !== undefined) return saved;
-    const gCard = cardById.get(session.guesses[index]);
-    return gCard ? resolveCardArt(gCard, session.trained) : Boolean(session.trained);
-  };
-  const guessKey = (id, trained) => `${id}:${trained ? 1 : 0}`;
-  const guessedKeys = () => new Set(session.guesses.map((id, i) => guessKey(id, guessTrained(i))));
-
-  // No fallback to the other art on purpose: a "trained" thumbnail must never quietly be untrained.
-  const cardAvatar = (card, size, trained) =>
-    createAvatar({
-      src: images.thumb(card.b, trained),
-      initial: card.character.short[0],
-      color: UNITS[card.unit].color,
-      size,
-    });
-
-  let selectedId = null;
-  let busy = false;
-  let countdown = null;
-  let artAttempt = 0;
-  let charDrawerOpen = false;
-  const state = { query: '', attr: null, unit: null, char: null, limit: PAGE_SIZE };
-
-  /* ---------- hero: the art ---------- */
-
+function createArtFrame({ src, signal, onRetryFocus }) {
+  let attempt = 0;
   const img = h('img', {
     class: 'frame-img',
     alt: '',
@@ -126,13 +108,27 @@ export function mountCardGame(root, ctx) {
     width: 940,
     height: 530,
   });
+  const retryBtn = h(
+    'button',
+    {
+      class: 'btn btn-secondary',
+      type: 'button',
+      onclick: () => {
+        const hadFocus = document.activeElement === retryBtn;
+        load();
+        if (hadFocus) onRetryFocus?.();
+      },
+    },
+    icon('refresh'),
+    'Try again',
+  );
   const failure = h(
     'div',
     { class: 'frame-failure', hidden: true },
     h('p', {}, "The card art didn't load. Check your connection and try again."),
-    h('button', { class: 'btn btn-secondary', type: 'button', onclick: loadArt }, icon('refresh'), 'Try again'),
+    retryBtn,
   );
-  const frame = h(
+  const el = h(
     'figure',
     {
       class: 'frame',
@@ -145,212 +141,157 @@ export function mountCardGame(root, ctx) {
     failure,
   );
 
-  function loadArt() {
-    frame.dataset.state = 'loading';
+  function load() {
+    el.dataset.state = 'loading';
     failure.hidden = true;
-    img.onload = () => (frame.dataset.state = 'ready');
+    img.onload = () => {
+      if (!signal?.aborted) el.dataset.state = 'ready';
+    };
     img.onerror = () => {
-      frame.dataset.state = 'failed';
+      if (signal?.aborted) return;
+      el.dataset.state = 'failed';
       failure.hidden = false;
     };
-    const base = images.art(answerCard.b, resolveCardArt(answerCard, session.trained));
-    img.src = artAttempt ? `${base}?retry=${artAttempt}` : base;
-    artAttempt += 1;
+    img.src = attempt ? `${src}?retry=${attempt}` : src;
+    attempt += 1;
   }
 
   function setStage(stage) {
-    frame.style.setProperty('--blur', stage == null ? 0 : BLUR[Math.min(stage, BLUR.length - 1)]);
-    frame.style.setProperty('--zoom', stage == null ? 1 : ZOOM[Math.min(stage, ZOOM.length - 1)]);
+    el.style.setProperty('--blur', stage == null ? 0 : BLUR[Math.min(stage, BLUR.length - 1)]);
+    el.style.setProperty('--zoom', stage == null ? 1 : ZOOM[Math.min(stage, ZOOM.length - 1)]);
   }
 
+  signal?.addEventListener(
+    'abort',
+    () => {
+      img.onload = null;
+      img.onerror = null;
+    },
+    { once: true },
+  );
+
+  return { el, load, setStage };
+}
+
+export function mountCardGame(root, ctx) {
+  const { data, mode, dateKey, signal } = ctx;
+  const { cards, cardById, characters, charById } = data;
+  const sortedCards = cards.slice().sort((a, b) => b.releaseDay - a.releaseDay || b.id - a.id);
+
+  const createAnswer = () => {
+    const answer =
+      mode === 'daily'
+        ? pickDailyCard(cards, dateKey, DAILY_DELAY_DAYS)
+        : cards[Math.floor(Math.random() * cards.length)].id;
+    const card = cardById.get(answer) ?? cards[0];
+    const coin = mode === 'daily' ? dailyCoin('card', dateKey) : Math.random() < 0.5;
+    return { answer: card.id, trained: resolveCardArt(card, coin) };
+  };
+
+  const session = ensureSession({
+    game: 'card',
+    mode,
+    dateKey,
+    createAnswer,
+    isValidAnswer: (id) => cardById.has(id),
+  });
+  const answerCard = cardById.get(session.answer);
+  const answerTrained = resolveCardArt(answerCard, session.trained);
+
+  const savedArtPref = store.getPref('cardArt', 'untrained') === 'trained' ? 'trained' : 'untrained';
+  let artMode = session.guesses.length
+    ? answerTrained
+      ? 'trained'
+      : 'untrained'
+    : savedArtPref;
+  const artFor = (card) => resolveCardArt(card, artMode === 'trained');
+
+  const guessTrainedAt = (index) => {
+    const saved = session.arts?.[index];
+    if (typeof saved === 'boolean') return saved;
+    const gCard = cardById.get(session.guesses[index]);
+    return gCard ? resolveCardArt(gCard, session.trained) : answerTrained;
+  };
+  const guessKey = (id, trained) => `${id}:${trained ? 1 : 0}`;
+  const guessedKeys = () => new Set(session.guesses.map((id, i) => guessKey(id, guessTrainedAt(i))));
+
+  let selectedId = null;
+  let busy = false;
+  let countdown = null;
+  let userArtEpoch = 0;
+  let debounce = null;
+  let listDirty = true;
+
+  const filterState = { query: '', attr: null, unit: null, charId: null, limit: PAGE_SIZE };
+
+  const clearPendingSearch = () => {
+    clearTimeout(debounce);
+    debounce = null;
+  };
+  signal?.addEventListener('abort', clearPendingSearch, { once: true });
+
+  /* ---------- hero: the art ---------- */
+
+  const artFrame = createArtFrame({
+    src: images.art(answerCard.asset, answerTrained),
+    signal,
+    onRetryFocus: () => {
+      if (session.status === 'playing') picker.focusInputQuietly();
+      else root.focus({ preventScroll: true });
+    },
+  });
+
   const gauge = createGauge();
-  const title = h('h2', { class: 'hero-title' });
+  const title = h('h2', { id: 'hero-title', class: 'hero-title' });
   const status = h('p', { class: 'hero-sub' });
-  const note = h('p', { class: 'hero-note', 'aria-live': 'polite' });
-  const giveUp =
-    mode === 'random'
-      ? h(
-          'button',
-          {
-            class: 'btn btn-quiet',
-            type: 'button',
-            onclick: () => {
-              if (busy || session.status !== 'playing') return;
-              forfeit(session);
-              renderEnd();
-            },
-          },
-          icon('flag', { size: 16 }),
-          'Give up',
-        )
-      : null;
+  const note = h('p', { class: 'hero-note' });
+  const giveUp = createGiveUpButton({
+    mode,
+    canForfeit: () => !busy && session.status === 'playing',
+    onForfeit: () => {
+      forfeit(session);
+      renderEnd();
+    },
+  });
   const hero = h(
     'section',
     { class: 'hero hero-card', 'aria-labelledby': 'hero-title' },
-    frame,
-    h('div', { class: 'hero-copy' }, title, status, h('div', { class: 'hero-meter' }, gauge.el, giveUp), note),
+    artFrame.el,
+    h('div', {}, title, status, h('div', { class: 'hero-meter' }, gauge.el, giveUp), note),
   );
-  title.id = 'hero-title';
 
-  /* ---------- picker ---------- */
+  /* ---------- filters & picker ---------- */
 
-  const input = h('input', {
-    id: 'card-search',
-    class: 'field-input',
-    type: 'text',
-    role: 'combobox',
-    placeholder: 'Search cards or characters',
-    autocomplete: 'off',
-    autocapitalize: 'off',
-    spellcheck: 'false',
-    enterkeyhint: 'go',
-    'aria-expanded': 'false',
-    'aria-controls': 'card-results',
-    'aria-autocomplete': 'list',
+  const filters = createCardFilters({
+    characters,
+    charById,
+    filterState,
+    onChange: () => resetList(),
   });
-  const lead = h('span', { class: 'field-lead' }, icon('search'));
-  const toggle = h(
-    'button',
-    {
-      class: 'field-toggle',
-      type: 'button',
-      'aria-label': 'Show cards',
-      'aria-expanded': 'false',
-      'aria-controls': 'card-results',
-      onclick: () => setOpen(picker.dataset.open !== 'true'),
-    },
-    icon('chevron'),
-  );
-  const field = h('div', { class: 'field' }, lead, input, toggle);
-  const submit = h('button', { class: 'btn btn-primary', type: 'submit', disabled: true }, 'Guess');
 
-  const attrChips = ATTRIBUTE_ORDER.map((key) =>
-    chip(ATTRIBUTES[key].label, {
-      lead: icon(ATTRIBUTES[key].icon, { size: 16 }),
-      color: ATTRIBUTES[key].color,
-      onclick: () => {
-        state.attr = state.attr === key ? null : key;
-        syncFilters();
-        resetList();
-      },
-      key,
-    }),
-  );
-  const unitChips = UNIT_ORDER.map((key) =>
-    chip(UNITS[key].short, {
-      color: UNITS[key].color,
-      onclick: () => {
-        state.unit = state.unit === key ? null : key;
-        if (state.unit && state.char && charById.get(state.char)?.unit !== state.unit) {
-          state.char = null;
-        }
-        syncFilters();
-        resetList();
-      },
-      key,
-    }),
-  );
-
-  /* Collapsible Character Filter ("drop-out" drawer) */
-  const charTriggerLabel = h('span', { class: 'char-trigger-label' });
-  const charTriggerLead = h('span', { class: 'char-trigger-lead' });
-  const charTrigger = h(
-    'button',
-    {
-      type: 'button',
-      class: 'chip char-filter-trigger',
-      'aria-expanded': 'false',
-      'aria-controls': 'card-char-drawer',
-      onclick: () => setCharDrawer(!charDrawerOpen),
-    },
-    charTriggerLead,
-    charTriggerLabel,
-    icon('chevron', { size: 15 }),
-  );
-  const charClear = h(
-    'button',
-    {
-      type: 'button',
-      class: 'chip char-filter-clear',
-      hidden: true,
-      'aria-label': 'Clear character filter',
-      onclick: () => {
-        state.char = null;
-        setCharDrawer(false);
-        syncFilters();
-        resetList();
-      },
-    },
-    icon('x', { size: 14 }),
-    'Clear',
-  );
-
-  const charCells = new Map();
-  for (const ch of characters) {
-    const btn = h(
-      'button',
-      {
-        type: 'button',
-        class: 'char-mini',
-        'aria-pressed': 'false',
-        dataset: { id: ch.id },
-        onclick: () => {
-          state.char = state.char === ch.id ? null : ch.id;
-          setCharDrawer(false);
-          syncFilters();
-          resetList();
-        },
-      },
-      createAvatar({
-        src: images.thumb(ch.avatar, false),
-        initial: ch.short[0],
-        color: ch.color,
-        size: 36,
-      }),
-      h('span', { class: 'char-mini-name' }, ch.short),
-    );
-    charCells.set(ch.id, btn);
-  }
-  const charDrawer = h(
-    'div',
-    {
-      id: 'card-char-drawer',
-      class: 'char-drawer',
-      role: 'group',
-      'aria-label': 'Filter by character',
-      hidden: true,
-    },
-    [...charCells.values()],
-  );
-  const charFilterRow = h('div', { class: 'char-filter-row' }, charTrigger, charClear);
-
-  const filters = h(
-    'div',
-    { class: 'filters' },
-    h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by attribute' }, attrChips),
-    h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by group' }, unitChips),
-    charFilterRow,
-    charDrawer,
-  );
-  const count = h('p', { class: 'results-count', 'aria-live': 'polite' });
-  const list = h('ul', { class: 'card-list', 'aria-label': 'Cards' });
+  const count = h('p', { class: 'results-count' });
+  const candidateList = h('ul', {
+    id: 'card-listbox',
+    class: 'card-list',
+    role: 'listbox',
+    'aria-label': 'Cards',
+  });
   const more = h(
     'button',
     {
       class: 'btn btn-secondary btn-block',
       type: 'button',
       onclick: () => {
-        state.limit += PAGE_SIZE;
+        const hadFocus = document.activeElement === more;
+        filterState.limit += PAGE_SIZE;
         renderList();
+        if (more.hidden && hadFocus) picker.focusInputQuietly();
       },
     },
     'Show more cards',
   );
   const none = h('p', { class: 'empty', hidden: true }, 'No card matches. Try fewer words or clear a filter.');
-  const results = h('div', { id: 'card-results', class: 'picker-results' }, filters, count, list, none, more);
 
-  // Which art the next guess is made with. It lives outside the list so it stays reachable
-  // after a card is chosen and the list has closed.
   const artButtons = ['untrained', 'trained'].map((key) =>
     h(
       'button',
@@ -360,6 +301,7 @@ export function mountCardGame(root, ctx) {
         'aria-pressed': 'false',
         dataset: { key },
         onclick: () => {
+          userArtEpoch += 1;
           store.setPref('cardArt', key);
           setArtMode(key);
         },
@@ -371,76 +313,47 @@ export function mountCardGame(root, ctx) {
     'div',
     { class: 'art-pick' },
     h('span', { class: 'art-pick-label', id: 'art-pick-label' }, 'Art'),
-    h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'art-pick-label' }, artButtons),
+    h('div', { class: 'seg seg-art', role: 'group', 'aria-labelledby': 'art-pick-label' }, artButtons),
   );
 
-  const picker = h(
-    'form',
-    { class: 'picker', dataset: { open: 'false' }, autocomplete: 'off', novalidate: true },
-    h('label', { class: 'sr-only', for: 'card-search' }, 'Search cards'),
-    h('div', { class: 'picker-bar' }, field, submit),
-    artPick,
-    results,
-  );
+  const optionEls = new Map();
 
-  function chip(labelText, { lead: chipLead, color, onclick, key }) {
-    return h(
-      'button',
-      {
-        type: 'button',
-        class: 'chip',
-        'aria-pressed': 'false',
-        dataset: { key },
-        style: { '--chip': color },
-        onclick,
-      },
-      chipLead ?? h('span', { class: 'chip-dot', 'aria-hidden': 'true' }),
-      labelText,
-    );
-  }
+  const picker = createPicker({
+    idPrefix: 'card',
+    searchLabel: 'Search cards',
+    placeholder: 'Search cards or characters',
+    toggleLabels: { open: 'Hide cards', closed: 'Show cards' },
+    extraControls: artPick,
+    resultsChildren: [filters.el, count, candidateList, none, more],
+    getNavigableItems: () => {
+      if (debounce !== null) resetList();
+      const out = [];
+      for (const [id, el] of optionEls) {
+        if (el.getAttribute('aria-disabled') !== 'true') out.push({ id, el });
+      }
+      return out;
+    },
+    hasSelection: () => selectedId != null,
+    onInput: (value) => {
+      if (selectedId != null) select(null);
+      filterState.query = value;
+      clearPendingSearch();
+      debounce = setTimeout(resetList, SEARCH_DEBOUNCE_MS);
+    },
+    onSelect: (id, meta) => select(id, meta),
+    onSubmit: () => submitGuess(),
+    onCloseInner: () => filters.closeDrawerIfOpen(),
+    onOpenChange: (open) => {
+      if (!open) filters.setDrawerOpen(false);
+      if (open && listDirty && session.status === 'playing') resetList();
+    },
+    onViewportChange: (isDesktop) => {
+      if (isDesktop && listDirty && session.status === 'playing') resetList();
+    },
+    signal,
+  });
 
-  function setCharDrawer(open) {
-    charDrawerOpen = open;
-    charDrawer.hidden = !open;
-    charTrigger.setAttribute('aria-expanded', String(open));
-    charTrigger.dataset.open = String(open);
-  }
-
-  function syncFilters() {
-    for (const c of attrChips) c.setAttribute('aria-pressed', String(c.dataset.key === state.attr));
-    for (const c of unitChips) c.setAttribute('aria-pressed', String(c.dataset.key === state.unit));
-
-    for (const ch of characters) {
-      const cell = charCells.get(ch.id);
-      const visible = !state.unit || ch.unit === state.unit;
-      cell.hidden = !visible;
-      cell.setAttribute('aria-pressed', String(state.char === ch.id));
-    }
-
-    if (state.char != null) {
-      const chosen = charById.get(state.char);
-      charTrigger.classList.add('is-selected');
-      charTriggerLead.replaceChildren(
-        createAvatar({
-          src: images.thumb(chosen.avatar, false),
-          initial: chosen.short[0],
-          color: chosen.color,
-          size: 20,
-        }),
-      );
-      charTriggerLabel.textContent = chosen.name;
-      charClear.hidden = false;
-    } else {
-      charTrigger.classList.remove('is-selected');
-      charTriggerLead.replaceChildren();
-      charTriggerLabel.textContent = state.unit
-        ? `Character: All ${UNITS[state.unit].short}`
-        : 'Character: All';
-      charClear.hidden = true;
-    }
-  }
-
-  function syncArtButtons() {
+  function syncSelectionAndArt() {
     const selectedCard = selectedId != null ? cardById.get(selectedId) : null;
     const effectiveKey = selectedCard
       ? artFor(selectedCard)
@@ -456,230 +369,124 @@ export function mountCardGame(root, ctx) {
       button.disabled = unavailable;
       button.setAttribute('aria-pressed', String(key === effectiveKey));
     }
-  }
 
-  function setOpen(open) {
-    picker.dataset.open = String(open);
-    toggle.setAttribute('aria-expanded', String(open));
-    input.setAttribute('aria-expanded', String(open));
-    toggle.setAttribute('aria-label', open ? 'Hide cards' : 'Show cards');
-    if (!open && charDrawerOpen) setCharDrawer(false);
-  }
+    if (!selectedCard) {
+      picker.submit.disabled = true;
+      return;
+    }
 
-  const label = (card) => `${card.n} · ${card.character.short} · ${artWord(artFor(card))}`;
+    const trained = artFor(selectedCard);
+    const alreadyGuessed = guessedKeys().has(guessKey(selectedCard.id, trained));
+    picker.submit.disabled = alreadyGuessed;
+    picker.input.value = `${selectedCard.name} · ${selectedCard.character.short} · ${artWord(trained)}`;
+    picker.lead.replaceChildren(cardAvatar(selectedCard, 28, trained));
+  }
 
   function setArtMode(nextMode) {
     artMode = nextMode;
-    syncArtButtons();
-    paintSelection();
-    renderList();
-  }
-
-  /** Show the chosen card in the field, in the art it would be guessed with. */
-  function paintSelection() {
-    if (selectedId == null) return;
-    const card = cardById.get(selectedId);
-    input.value = label(card);
-    lead.replaceChildren(cardAvatar(card, 28, artFor(card)));
-  }
-
-  function matching() {
-    const tokens = state.query.toLowerCase().split(/\s+/).filter(Boolean);
-    return sorted.filter(
-      (card) =>
-        (!state.attr || card.at === state.attr) &&
-        (!state.unit || card.unit === state.unit) &&
-        (!state.char || card.c === state.char) &&
-        tokens.every((t) => card.haystack.includes(t)),
-    );
+    syncSelectionAndArt();
+    if (session.status === 'playing') renderList();
   }
 
   function resetList() {
-    state.limit = PAGE_SIZE;
-    list.scrollTop = 0;
-    results.scrollTop = 0;
+    clearPendingSearch();
+    filterState.limit = PAGE_SIZE;
+    candidateList.scrollTop = 0;
+    picker.results.scrollTop = 0;
     renderList();
   }
 
-  function cardArtBadgeText(card, trained) {
-    if (card.trainedOnly) return 'Trained only';
-    if (card.untrainedOnly) return 'Untrained only';
-    return artWord(trained);
-  }
-
   function renderList() {
-    const all = matching();
+    picker.clearActive();
+    optionEls.clear();
+    listDirty = false;
+
+    const all = filterCards(sortedCards, filterState);
     const guessed = guessedKeys();
-    const shown = all.slice(0, state.limit);
-    list.replaceChildren(
+    const shown = all.slice(0, filterState.limit);
+
+    candidateList.replaceChildren(
       ...shown.map((card) => {
         const trained = artFor(card);
         const done = guessed.has(guessKey(card.id, trained));
-        return h(
+        const opt = h(
           'li',
-          {},
-          h(
-            'button',
-            {
-              type: 'button',
-              class: 'card-opt',
-              'aria-pressed': String(card.id === selectedId),
-              disabled: done,
-              dataset: { id: card.id },
-              onclick: () => select(card.id),
+          {
+            id: `card-opt-${card.id}`,
+            role: 'option',
+            class: 'card-opt',
+            'aria-selected': String(card.id === selectedId),
+            'aria-disabled': String(done),
+            dataset: { id: card.id },
+            onclick: () => {
+              if (done) return;
+              select(card.id, { source: 'pointer' });
             },
-            cardAvatar(card, 48, trained),
+          },
+          cardAvatar(card, 48, trained),
+          h(
+            'span',
+            { class: 'card-opt-text' },
+            h('span', { class: 'card-opt-name', lang: card.isJp ? 'ja' : null }, card.name),
             h(
               'span',
-              { class: 'card-opt-text' },
-              h('span', { class: 'card-opt-name', lang: card.jp ? 'ja' : null }, card.n),
-              h(
-                'span',
-                { class: 'card-opt-sub' },
-                card.character.short,
-                ' · ',
-                cardMeta(card),
-                h('span', { class: 'art-tag' }, cardArtBadgeText(card, trained)),
-              ),
+              { class: 'card-opt-sub' },
+              card.character.short,
+              ' · ',
+              cardMeta(card),
+              h('span', { class: 'art-tag' }, cardArtBadgeText(card, trained)),
             ),
-            done && h('span', { class: 'card-opt-done' }, 'Guessed'),
           ),
+          done && h('span', { class: 'card-opt-done' }, 'Guessed'),
         );
+        optionEls.set(card.id, opt);
+        return opt;
       }),
     );
+
     more.hidden = all.length <= shown.length;
     none.hidden = all.length > 0;
-    count.textContent = all.length === cards.length ? `${cards.length} cards` : `${plural(all.length, 'card')} found`;
+    count.textContent =
+      all.length === cards.length ? `${cards.length} cards` : `${plural(all.length, 'card')} found`;
   }
 
-  function cardMeta(card) {
-    return h(
-      'span',
-      { class: 'card-opt-meta' },
-      h('span', { class: 'meta-attr', style: { color: ATTRIBUTES[card.at].color } }, icon(ATTRIBUTES[card.at].icon, { size: 14 })),
-      ATTRIBUTES[card.at].label,
-      ' · ',
-      icon('star', { size: 14 }),
-      card.r,
-    );
-  }
-
-  function select(id) {
+  function select(id, { source = 'program' } = {}) {
+    userArtEpoch += 1;
+    clearPendingSearch();
     selectedId = id;
-    for (const button of list.querySelectorAll('.card-opt')) {
-      button.setAttribute('aria-pressed', String(Number(button.dataset.id) === id));
+    picker.clearActive();
+    for (const [cid, el] of optionEls) {
+      el.setAttribute('aria-selected', String(cid === id));
     }
-    syncArtButtons();
     if (id == null) {
-      submit.disabled = true;
-      lead.replaceChildren(icon('search'));
+      syncSelectionAndArt();
+      picker.lead.replaceChildren(icon('search'));
       return;
     }
     const card = cardById.get(id);
-    state.query = '';
-    submit.disabled = false;
-    paintSelection();
-    setOpen(false);
+    if (!card) return;
+    if (filterState.query !== '') {
+      filterState.query = '';
+      listDirty = true;
+    }
+    syncSelectionAndArt();
+    if (listDirty && picker.isDesktop()) resetList();
+    picker.setOpen(false);
+    picker.focusAfterSelect(source);
     announce(
-      `${card.n}, ${card.character.name}, ${artWord(artFor(card)).toLowerCase()} art, selected. Press Guess to submit.`,
+      `${card.name}, ${card.character.name}, ${artWord(artFor(card)).toLowerCase()} art, selected. Press Guess to submit.`,
     );
   }
 
-  let debounce = null;
-  input.addEventListener('focus', () => {
-    setOpen(true);
-    if (selectedId != null) input.select();
-  });
-  input.addEventListener('input', () => {
-    if (selectedId != null) select(null);
-    state.query = input.value;
-    setOpen(true);
-    clearTimeout(debounce);
-    debounce = setTimeout(resetList, 120);
-  });
-  document.addEventListener('pointerdown', onOutsidePointer);
-  function onOutsidePointer(event) {
-    if (!picker.contains(event.target)) setOpen(false);
-  }
-
-  // Enter with nothing chosen picks the first remaining match; a second Enter guesses it.
-  // (Handled here rather than via form submission: browsers skip implicit submission
-  // while the submit button is disabled.)
-  function enterOrSubmit() {
-    if (selectedId == null) {
-      clearTimeout(debounce);
-      state.query = input.value;
-      const guessed = guessedKeys();
-      const first = matching().find((card) => !guessed.has(guessKey(card.id, artFor(card))));
-      if (first) select(first.id);
-      return;
-    }
-    submitGuess();
-  }
-
-  picker.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && charDrawerOpen) {
-      event.stopPropagation();
-      setCharDrawer(false);
-      charTrigger.focus();
-    }
-  });
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setOpen(false);
-    if (event.key === 'Enter' && !event.isComposing) {
-      event.preventDefault();
-      enterOrSubmit();
-    }
-  });
-  picker.addEventListener('submit', (event) => {
-    event.preventDefault();
-    enterOrSubmit();
-  });
-
   /* ---------- history ---------- */
 
-  const list2 = h('ol', { class: 'history-list', 'aria-label': 'Your guesses, newest first' });
+  const historyList = h('ol', { class: 'history-list', 'aria-label': 'Your guesses, newest first' });
   const hint = h(
     'p',
     { class: 'empty' },
     'Search for any card you think it could be, and pick the art you think it shows. Tiles show whether its attribute, group, character and art match the answer.',
   );
-  const history = h('section', { class: 'history', 'aria-label': 'Guesses' }, list2, hint);
-
-  function buildRow(card, trained, { pending }) {
-    const answerTrained = resolveCardArt(answerCard, session.trained);
-    const result = compareCards(card, answerCard, { guessTrained: trained, answerTrained });
-    const tiles = [
-      createTile({
-        kind: 'attr',
-        state: result.attr,
-        value: ATTRIBUTES[card.at].label,
-        lead: icon(ATTRIBUTES[card.at].icon, { size: 16 }),
-        pending,
-      }),
-      createTile({ kind: 'group', state: result.group, value: UNITS[card.unit].short, pending }),
-      createTile({ kind: 'character', state: result.character, value: card.character.short, pending }),
-      createTile({ kind: 'art', state: result.art, value: artWord(trained), pending }),
-    ];
-    const row = h(
-      'li',
-      { class: pending ? 'row row-card is-new' : 'row row-card' },
-      h('span', { class: 'sr-only' }, `${card.n}, ${card.character.name}.`),
-      h(
-        'div',
-        { class: 'row-card-head', 'aria-hidden': 'true' },
-        cardAvatar(card, 44, trained),
-        h(
-          'div',
-          { class: 'row-card-title' },
-          h('strong', { lang: card.jp ? 'ja' : null }, card.n),
-          h('span', { class: 'row-card-sub' }, card.character.name, ' · ', cardMeta(card)),
-        ),
-      ),
-      h('div', { class: 'row-card-tiles' }, tiles),
-    );
-    return { row, tiles, result };
-  }
+  const history = h('section', { class: 'history', 'aria-label': 'Guesses' }, historyList, hint);
 
   /* ---------- flow ---------- */
 
@@ -690,171 +497,150 @@ export function mountCardGame(root, ctx) {
       title.textContent = mode === 'daily' ? "Today's card" : 'Random card';
       status.textContent = `Guess ${used + 1} of ${MAX_GUESSES}`;
       if (used === 0) note.textContent = 'The art sharpens a little with every wrong guess.';
-      setStage(used);
+      artFrame.setStage(used);
     }
   }
 
   async function submitGuess() {
     if (busy || session.status !== 'playing' || selectedId == null) return;
+    if (mode === 'daily' && session.guesses.length === 0 && ctx.rolloverIfStale()) return;
     const card = cardById.get(selectedId);
+    if (!card) return;
     const trained = artFor(card);
     if (guessedKeys().has(guessKey(card.id, trained))) return;
+
     busy = true;
-    const keepFocus = document.activeElement === input;
-    const answerTrained = resolveCardArt(answerCard, session.trained);
-    // Only the exact card in the exact art wins. Right card, other art is a miss, and the art tile says so.
-    const exact = card.id === answerCard.id && trained === answerTrained;
-    applyGuess(session, card.id, { correct: exact, art: trained });
-    select(null);
-    input.value = '';
-    state.query = '';
-    setOpen(false);
-    renderList();
+    try {
+      const exact = card.id === answerCard.id && trained === answerTrained;
+      let epochAtSubmit = 0;
+      const formatSpeech = (result) =>
+        `${card.name}, ${artWord(trained).toLowerCase()} art. Attribute ${stateWords('attr', result.attr)}. Group ${stateWords('group', result.group)}. Character ${stateWords('character', result.character)}. Art ${stateWords('art', result.art)}.`;
 
-    const { row, tiles, result } = buildRow(card, trained, { pending: !reduced });
-    list2.prepend(row);
-    hint.hidden = true;
-    renderStatus();
-    if (keepFocus) input.focus({ preventScroll: true });
-
-    await revealTiles(tiles, { reduced });
-    const sameEverything = result.attr === 'correct' && result.group === 'correct' && result.character === 'correct';
-    const left = MAX_GUESSES - session.guesses.length;
-    if (session.status === 'playing') {
-      note.textContent =
-        card.id === answerCard.id
-          ? 'Right card, wrong art. Try its other version.'
-          : sameEverything
-            ? 'Same character, attribute and group, but a different card. Let the art decide.'
-            : '';
-      // The art tile has just told the player which art the puzzle shows; the picker follows it.
-      setArtMode(answerTrained ? 'trained' : 'untrained');
+      await executeGuessTurn({
+        session,
+        picker,
+        historyList,
+        hintEl: hint,
+        signal,
+        commitAndBuildRow: ({ reduced }) => {
+          applyGuess(session, card.id, { correct: exact, art: trained });
+          select(null);
+          filterState.query = '';
+          epochAtSubmit = userArtEpoch;
+          return buildCardRow(card, trained, answerCard, answerTrained, { pending: !reduced });
+        },
+        onAfterCommit: () => {
+          resetList();
+          renderStatus();
+        },
+        onRevealPlaying: ({ result, left }) => {
+          const sameEverything =
+            result.attr === 'correct' && result.group === 'correct' && result.character === 'correct';
+          note.textContent =
+            card.id === answerCard.id
+              ? 'Right card, wrong art. Try its other version.'
+              : sameEverything
+                ? 'Same character, attribute and group, but a different card. Let the art decide.'
+                : '';
+          if (userArtEpoch === epochAtSubmit && selectedId == null) {
+            setArtMode(answerTrained ? 'trained' : 'untrained');
+          }
+          announce(`${formatSpeech(result)} The art is a little sharper. ${plural(left, 'guess')} left.`);
+        },
+        onRevealEnded: ({ result }) => {
+          renderEnd({ announcePrefix: `${formatSpeech(result)} ` });
+        },
+      });
+    } finally {
+      busy = false;
     }
-    announce(
-      `${card.n}, ${artWord(trained).toLowerCase()} art. Attribute ${stateWords('attr', result.attr)}. Group ${stateWords('group', result.group)}. Character ${stateWords('character', result.character)}. Art ${stateWords('art', result.art)}.` +
-        (session.status === 'playing' ? ` The art is a little sharper. ${plural(left, 'guess')} left.` : ''),
-    );
-    if (session.status !== 'playing') {
-      await sleep(reduced ? 0 : 250);
-      renderEnd();
-    }
-    busy = false;
   }
 
-  function shareText() {
-    const marks = { correct: '🟩', wrong: '⬛' };
-    const answerTrained = resolveCardArt(answerCard, session.trained);
-    const rows = session.guesses.map((id, i) => {
-      const r = compareCards(cardById.get(id), answerCard, { guessTrained: guessTrained(i), answerTrained });
-      return [r.attr, r.group, r.character, r.art].map((s) => marks[s]).join('');
+  function buildShareText() {
+    const tileRows = [];
+    session.guesses.forEach((id, i) => {
+      const gCard = cardById.get(id);
+      if (!gCard) return;
+      const r = compareCards(gCard, answerCard, { guessTrained: guessTrainedAt(i), answerTrained });
+      tileRows.push([r.attr, r.group, r.character, r.art]);
     });
-    const score = session.status === 'won' ? session.guesses.length : 'X';
-    const name = mode === 'daily' ? `Card #${puzzleNumber(dateKey)}` : 'Card (random)';
-    return `Sekaidle ${name} ${score}/${MAX_GUESSES}\n${rows.join('\n')}\n${location.origin}${location.pathname}`;
+    return formatShareText({
+      gameLabel: 'Card',
+      mode,
+      dateKey,
+      status: session.status,
+      guessCount: session.guesses.length,
+      tileRows,
+      url: `${location.origin}${location.pathname}`,
+    });
   }
 
-  function renderEnd() {
-    const won = session.status === 'won';
-    const exhausted = session.guesses.length >= MAX_GUESSES;
-    const answerTrained = resolveCardArt(answerCard, session.trained);
+  function renderEnd({ silent = false, announcePrefix = '' } = {}) {
+    if (signal?.aborted) return;
     root.dataset.outcome = session.status;
     gauge.set(session.guesses.length, session.status);
-    setStage(null);
-    frame.setAttribute('aria-label', `${answerCard.n}, ${answerCard.character.name}`);
-    title.textContent = answerCard.n;
-    title.lang = answerCard.jp ? 'ja' : '';
-    status.textContent = won
-      ? session.guesses.length === 1
-        ? 'First try!'
-        : `Solved in ${session.guesses.length} of ${MAX_GUESSES}`
-      : exhausted
-        ? 'Out of guesses'
-        : 'Gave up';
+    artFrame.setStage(null);
+    artFrame.el.setAttribute('aria-label', `${answerCard.name}, ${answerCard.character.name}`);
+    title.textContent = answerCard.name;
+    if (answerCard.isJp) title.setAttribute('lang', 'ja');
+    else title.removeAttribute('lang');
+    status.textContent = outcomeStatusText(session);
     hint.hidden = true;
     note.textContent = '';
-    if (giveUp) giveUp.hidden = true;
 
-    const released = new Date(answerCard.d * 86400000).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC',
-    });
-    const facts = h(
-      'dl',
-      { class: 'facts' },
-      fact('Character', answerCard.character.name),
-      fact('Attribute', ATTRIBUTES[answerCard.at].label),
-      fact('Group', wrapCross(UNITS[answerCard.unit].label)),
-      fact('Rarity', `${answerCard.r}-star, ${answerTrained ? 'trained' : 'untrained'} art`),
-      fact('Released (JP)', released),
-    );
-    const actions = h('div', { class: 'result-actions' }, createShareButton(shareText), ...endActions());
-    const panel = h('section', { class: 'result', 'aria-label': 'Result' }, facts, actions);
     countdown?.stop();
-    if (mode === 'daily') {
-      countdown = createCountdown(ctx.refresh);
-      panel.append(countdown.el);
+    const mounted = mountResultPanel({
+      pickerEl: picker.el,
+      giveUpBtn: giveUp,
+      mode,
+      dateKey,
+      factPairs: [
+        ['Character', answerCard.character.name],
+        ['Attribute', ATTRIBUTES[answerCard.attr].label],
+        ['Group', wrapCross(UNITS[answerCard.unit].label)],
+        ['Rarity', `${answerCard.rarity}-star, ${artWord(answerTrained).toLowerCase()} art`],
+        ['Released (JP)', formatEpochDay(answerCard.releaseDay)],
+      ],
+      buildShareText,
+      onNewRandom: () => {
+        resetRandomSession('card', createAnswer);
+        ctx.refresh();
+      },
+      ctx,
+    });
+    countdown = mounted.countdown;
+
+    if (!silent && !signal?.aborted) {
+      announce(`${announcePrefix}${outcomeAnnouncement(session, answerCard.name)}`);
     }
-    picker.replaceWith(panel);
-    document.removeEventListener('pointerdown', onOutsidePointer);
-    announce(
-      won
-        ? `Correct! It was ${answerCard.n}, solved in ${plural(session.guesses.length, 'guess')}.`
-        : `${exhausted ? 'Out of guesses.' : 'Gave up.'} The answer was ${answerCard.n}.`,
-    );
-  }
-
-  function endActions() {
-    return mode === 'daily'
-      ? [
-          h('button', { class: 'btn btn-secondary', type: 'button', onclick: ctx.playRandom }, icon('dice'), 'Play a random puzzle'),
-          h('button', { class: 'btn btn-quiet', type: 'button', onclick: ctx.openStats }, icon('chart'), 'Stats'),
-        ]
-      : [
-          h(
-            'button',
-            {
-              class: 'btn btn-secondary',
-              type: 'button',
-              onclick: () => {
-                resetRandomSession('card', createAnswer);
-                ctx.refresh();
-              },
-            },
-            icon('refresh'),
-            'New puzzle',
-          ),
-        ];
-  }
-
-  function fact(labelText, value) {
-    return h('div', { class: 'fact' }, h('dt', {}, labelText), h('dd', {}, value));
   }
 
   /* ---------- mount ---------- */
 
   root.dataset.outcome = 'playing';
-  root.replaceChildren(hero, picker, history);
-  syncFilters();
-  setArtMode(artMode);
+  root.replaceChildren(hero, picker.el, history);
   session.guesses.forEach((id, i) => {
     const gCard = cardById.get(id);
     if (gCard) {
-      list2.prepend(buildRow(gCard, guessTrained(i), { pending: false }).row);
+      historyList.prepend(buildCardRow(gCard, guessTrainedAt(i), answerCard, answerTrained, { pending: false }).row);
     }
   });
   hint.hidden = session.guesses.length > 0;
-  setStage(Math.min(session.guesses.length, BLUR.length - 1));
+  artFrame.setStage(Math.min(session.guesses.length, BLUR.length - 1));
   renderStatus();
-  loadArt();
-  if (session.status !== 'playing') renderEnd();
+  artFrame.load();
+
+  if (session.status === 'playing') {
+    filters.sync();
+    setArtMode(artMode);
+  } else {
+    renderEnd({ silent: true });
+  }
 
   return {
     destroy() {
-      clearTimeout(debounce);
+      clearPendingSearch();
       countdown?.stop();
-      document.removeEventListener('pointerdown', onOutsidePointer);
     },
   };
 }

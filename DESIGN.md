@@ -17,11 +17,11 @@ colors:
   page-dark: "oklch(0.19 0.03 275)"
   surface-dark: "oklch(0.24 0.034 275)"
   ink-dark: "oklch(0.96 0.008 275)"
-  attr-cute: "#ff6699"
-  attr-cool: "#4488ee"
-  attr-pure: "#44bb55"
-  attr-happy: "#ffaa22"
-  attr-mysterious: "#9966cc"
+  attr-cute: "light-dark(oklch(0.56 0.2 355), oklch(0.74 0.17 355))"
+  attr-cool: "light-dark(oklch(0.55 0.17 258), oklch(0.72 0.15 258))"
+  attr-pure: "light-dark(oklch(0.55 0.16 145), oklch(0.74 0.16 145))"
+  attr-happy: "light-dark(oklch(0.56 0.15 68), oklch(0.78 0.15 75))"
+  attr-mysterious: "light-dark(oklch(0.54 0.17 305), oklch(0.74 0.15 305))"
   shadow-lift: "oklch(0.2 0.05 275 / 0.18)"
   shadow-dialog: "oklch(0.15 0.05 275 / 0.5)"
   shadow-dialog-edge: "oklch(0.15 0.05 275 / 0.2)"
@@ -78,6 +78,7 @@ rounded:
 spacing:
   xs: "4px"
   sm: "8px"
+  sm-md: "12px"
   md: "16px"
   lg: "24px"
   xl: "40px"
@@ -175,16 +176,16 @@ Rounded rectangles at 10, 14, 18 and 24px (the largest for dialogs and the myste
 Primary is ink on page. Secondary is a surface with a boundary line. Quiet is text only. 48px tall (36px for quiet), 14px radius, 1px press offset on active, disabled primary drops to a pressed surface.
 
 ### Tiles
-The core component: 60px minimum height, state icon above a value in the condensed width. States: pending (neutral, icon hidden), match, direction up/down, miss. The reveal flips each tile on its X axis, 520ms with 190ms stagger, and swaps state at the midpoint.
+The core component: 60px minimum height (48px in the compact How-to-Play legend), state icon above a value in the condensed width. States: pending (neutral, icon hidden), match, direction up/down, miss. The reveal flips each tile on its X axis, 520ms with 190ms stagger, and swaps state at the midpoint.
 
 ### Guess gauge
 Six slanted bars. Used bars fill ink; a winning final bar fills green.
 
 ### Fields and chips
-48px field with a 3:1 boundary and a focus ring in `focus`. Chips are pills with an unit or attribute mark, and invert to ink when pressed.
+48px field with a 3:1 boundary and a focus ring in `focus`. Chips are pills with a unit or attribute mark (plus a collapsible character-filter drawer trigger in Card mode), and invert to ink when pressed.
 
 ### Art switch
-A joined two-way pill (Untrained / Trained) under the card search, always visible so it works with the list closed. The pressed side inverts to ink like a chip. It picks the art a card guess is made with; list rows carry a quiet outlined "Trained" / "Untrained" tag, with no colour because it encodes neither a unit, attribute nor result.
+A joined two-way pill (Untrained / Trained) under the card search, always visible so it works with the list closed. The pressed side inverts to ink like a chip. It picks the art a card guess is made with; list rows carry a quiet outlined "Trained" / "Untrained" (or "Trained only" / "Untrained only" on single-art cards) tag, with no colour because it encodes neither a unit, attribute nor result.
 
 ### Art frame
 16:9 frame with container-relative blur (`cqw`) and a zoom that relaxes with the blur so soft edges stay hidden. Skeleton while loading; a retry state if the image fails.

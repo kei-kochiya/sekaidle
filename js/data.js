@@ -1,32 +1,34 @@
-/* Game data: loading, lookup tables, and image URLs. */
+/* Game data: loading, normalized models, lookup tables, and image URLs. */
+
+export const MAX_GUESSES = 6;
 
 const IMAGE_HOST = 'https://assets.unipjsk.com/startapp/';
 
 export const UNITS = {
-  leo_need: { label: 'Leo/need', short: 'Leo/need', color: '#4455dd' },
-  mmj: { label: 'MORE MORE JUMP!', short: 'MMJ', color: '#88dd44' },
-  vbs: { label: 'Vivid BAD SQUAD', short: 'VBS', color: '#ee1166' },
-  wxs: { label: 'Wonderlands×Showtime', short: 'WxS', color: '#ff9900' },
-  n25: { label: 'Nightcord at 25:00', short: 'Nightcord', color: '#884499' },
-  vs: { label: 'Virtual Singer', short: 'Virtual Singer', color: '#33ccbb' },
+  leo_need: { label: 'Leo/need', short: 'Leo/need', color: 'var(--unit-leo-need)' },
+  mmj: { label: 'MORE MORE JUMP!', short: 'MMJ', color: 'var(--unit-mmj)' },
+  vbs: { label: 'Vivid BAD SQUAD', short: 'VBS', color: 'var(--unit-vbs)' },
+  wxs: { label: 'Wonderlands×Showtime', short: 'WxS', color: 'var(--unit-wxs)' },
+  n25: { label: 'Nightcord at 25:00', short: 'Nightcord', color: 'var(--unit-n25)' },
+  vs: { label: 'Virtual Singer', short: 'Virtual Singer', color: 'var(--unit-vs)' },
 };
 
 export const UNIT_ORDER = ['leo_need', 'mmj', 'vbs', 'wxs', 'n25', 'vs'];
 
 export const SCHOOLS = {
   // Soft hyphens (U+00AD): on a very narrow tile the word breaks at a syllable, not mid-letter.
-  miyamasuzaka: { label: 'Miyamasuzaka Girls Academy', short: 'Miya­masu­zaka' },
-  kamiyama: { label: 'Kamiyama High School', short: 'Kami­yama' },
-  correspondence: { label: 'Correspondence School', short: 'Cor­re­spon­dence' },
+  miyamasuzaka: { label: 'Miyamasuzaka Girls Academy', short: 'Miya\u00admasu\u00adzaka' },
+  kamiyama: { label: 'Kamiyama High School', short: 'Kami\u00adyama' },
+  correspondence: { label: 'Correspondence School', short: 'Cor\u00adre\u00adspon\u00addence' },
   none: { label: 'No school', short: 'No school' },
 };
 
 export const ATTRIBUTES = {
-  cute: { label: 'Cute', color: '#ff6699', icon: 'heart' },
-  cool: { label: 'Cool', color: '#4488ee', icon: 'drop' },
-  pure: { label: 'Pure', color: '#44bb55', icon: 'leaf' },
-  happy: { label: 'Happy', color: '#ffaa22', icon: 'star' },
-  mysterious: { label: 'Mysterious', color: '#9966cc', icon: 'moon' },
+  cute: { label: 'Cute', icon: 'heart', token: 'var(--attr-cute)' },
+  cool: { label: 'Cool', icon: 'drop', token: 'var(--attr-cool)' },
+  pure: { label: 'Pure', icon: 'leaf', token: 'var(--attr-pure)' },
+  happy: { label: 'Happy', icon: 'star', token: 'var(--attr-happy)' },
+  mysterious: { label: 'Mysterious', icon: 'moon', token: 'var(--attr-mysterious)' },
 };
 
 export const ATTRIBUTE_ORDER = ['cute', 'cool', 'pure', 'happy', 'mysterious'];
@@ -70,29 +72,69 @@ async function fetchJson(url) {
   return response.json();
 }
 
-export async function loadData() {
-  const [characters, cardData] = await Promise.all([
-    fetchJson('data/characters.json'),
-    fetchJson('data/cards.json'),
-  ]);
+/** Normalize compact wire JSON (`c`, `r`, `at`, `n`, `b`, `d`, `jp`, `t`, `nt`) into readable fields. */
+export function normalizeRuntimeData(rawCharacters, rawCardData) {
+  if (!Array.isArray(rawCharacters) || !Array.isArray(rawCardData?.cards)) {
+    throw new Error('Malformed game data payload');
+  }
 
-  const charById = new Map(characters.map((c) => [c.id, c]));
-  const cardsByCharId = new Map(characters.map((c) => [c.id, []]));
+  const characters = rawCharacters
+    .filter(
+      (ch) =>
+        ch &&
+        Number.isInteger(ch.id) &&
+        UNITS[ch.unit] &&
+        SCHOOLS[ch.school] &&
+        Array.isArray(ch.birthday) &&
+        ch.birthday.length === 2 &&
+        Number.isFinite(ch.height),
+    )
+    .slice()
+    .sort((a, b) => a.id - b.id)
+    .map((ch) => ({
+      ...ch,
+      haystack: [ch.name, ch.short, UNITS[ch.unit].label, UNITS[ch.unit].short, ch.unit]
+        .join(' ')
+        .toLowerCase(),
+    }));
 
-  const cards = cardData.cards.map((card) => {
-    const character = charById.get(card.c);
-    const enriched = {
-      ...card,
-      trainedOnly: Boolean(card.t),
-      untrainedOnly: Boolean(card.nt),
+  const charById = new Map(characters.map((ch) => [ch.id, ch]));
+  const cardsByCharId = new Map(characters.map((ch) => [ch.id, []]));
+
+  const cards = [];
+  for (const raw of rawCardData.cards) {
+    const character = charById.get(raw?.c);
+    const attrMeta = ATTRIBUTES[raw?.at];
+    if (
+      !character ||
+      !attrMeta ||
+      !Number.isInteger(raw.id) ||
+      !Number.isFinite(raw.d) ||
+      typeof raw.n !== 'string' ||
+      typeof raw.b !== 'string' ||
+      !raw.b
+    ) {
+      continue;
+    }
+
+    const card = {
+      id: raw.id,
+      charId: raw.c,
+      rarity: raw.r,
+      attr: raw.at,
+      name: raw.n,
+      asset: raw.b,
+      releaseDay: raw.d,
+      isJp: Boolean(raw.jp),
+      trainedOnly: Boolean(raw.t),
+      untrainedOnly: Boolean(raw.nt),
       character,
       unit: character.unit,
-      // Lowercased text the search box matches against.
       haystack: [
-        card.n,
+        raw.n,
         character.name,
         character.short,
-        ATTRIBUTES[card.at].label,
+        attrMeta.label,
         UNITS[character.unit].label,
         UNITS[character.unit].short,
         character.unit,
@@ -100,16 +142,28 @@ export async function loadData() {
         .join(' ')
         .toLowerCase(),
     };
-    cardsByCharId.get(card.c)?.push(enriched);
-    return enriched;
-  });
+    cards.push(card);
+    cardsByCharId.get(card.charId)?.push(card);
+  }
+
+  if (!characters.length || !cards.length) {
+    throw new Error('Empty character or card dataset');
+  }
 
   return {
-    meta: cardData.meta,
+    meta: rawCardData.meta ?? { built: '', latestCard: '', cards: cards.length, characters: characters.length },
     characters,
     charById,
     cards,
     cardById: new Map(cards.map((c) => [c.id, c])),
     cardsByCharId,
   };
+}
+
+export async function loadData() {
+  const [rawCharacters, rawCardData] = await Promise.all([
+    fetchJson('data/characters.json'),
+    fetchJson('data/cards.json'),
+  ]);
+  return normalizeRuntimeData(rawCharacters, rawCardData);
 }
