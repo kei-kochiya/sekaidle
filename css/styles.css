@@ -786,6 +786,79 @@ input {
   color: inherit;
 }
 
+/* Collapsible character filter in Card mode */
+.char-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+.char-filter-trigger {
+  padding-inline: 0.625rem 0.6875rem;
+}
+.char-filter-trigger .icon {
+  color: currentColor;
+  transition: transform 0.2s var(--ease-out);
+}
+.char-filter-trigger[data-open="true"] .icon {
+  transform: rotate(180deg);
+}
+.char-filter-trigger.is-selected {
+  padding-left: 0.375rem;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--bg);
+}
+.char-trigger-lead {
+  display: inline-grid;
+  place-items: center;
+}
+.char-trigger-lead:empty {
+  display: none;
+}
+.char-trigger-lead .avatar {
+  box-shadow: 0 0 0 1.5px var(--ring);
+}
+.char-filter-clear .icon {
+  color: currentColor;
+}
+
+.char-drawer {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.125rem, 1fr));
+  gap: 0.375rem 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+.char-mini {
+  display: grid;
+  justify-items: center;
+  gap: 0.3125rem;
+  padding: 0.375rem 0.125rem 0.3125rem;
+  border: 2px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.char-mini:hover {
+  background: var(--surface);
+}
+.char-mini[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--surface);
+}
+.char-mini-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Which art the next card guess is made with: a joined pair, one always pressed. */
 .art-pick {
   display: flex;
@@ -816,12 +889,16 @@ input {
   cursor: pointer;
   transition: background-color 0.15s, color 0.15s;
 }
-.seg-btn:hover {
+.seg-btn:hover:not(:disabled) {
   background: var(--surface-2);
 }
 .seg-btn[aria-pressed="true"] {
   background: var(--ink);
   color: var(--bg);
+}
+.seg-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .art-tag {
@@ -1056,9 +1133,12 @@ input {
 }
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: 0.875rem 1rem;
   margin: 0;
+}
+.fact {
+  min-width: 0;
 }
 .fact dt {
   font-size: 0.75rem;
@@ -1068,6 +1148,8 @@ input {
 .fact dd {
   margin: 0;
   font-weight: 600;
+  font-stretch: 94%;
+  overflow-wrap: anywhere;
 }
 .result-actions {
   display: flex;

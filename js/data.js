@@ -39,6 +39,20 @@ export const birthdayValue = ([month, day]) => month * 100 + day;
 
 const variantName = (trained) => (trained ? 'after_training' : 'normal');
 
+/** Resolve a valid art boolean for a card, clamping single-art cards to the only art they have. */
+export function resolveCardArt(card, preferTrained = false) {
+  if (card.trainedOnly) return true;
+  if (card.untrainedOnly) return false;
+  return Boolean(preferTrained);
+}
+
+/** Return the valid (trained: boolean) variants available for a card. */
+export function cardArtVariants(card) {
+  if (card.trainedOnly) return [true];
+  if (card.untrainedOnly) return [false];
+  return [false, true];
+}
+
 export const images = {
   /** 128px square face crop. */
   thumb(assetName, trained = false) {
@@ -63,11 +77,14 @@ export async function loadData() {
   ]);
 
   const charById = new Map(characters.map((c) => [c.id, c]));
+  const cardsByCharId = new Map(characters.map((c) => [c.id, []]));
+
   const cards = cardData.cards.map((card) => {
     const character = charById.get(card.c);
-    return {
+    const enriched = {
       ...card,
       trainedOnly: Boolean(card.t),
+      untrainedOnly: Boolean(card.nt),
       character,
       unit: character.unit,
       // Lowercased text the search box matches against.
@@ -78,10 +95,13 @@ export async function loadData() {
         ATTRIBUTES[card.at].label,
         UNITS[character.unit].label,
         UNITS[character.unit].short,
+        character.unit,
       ]
         .join(' ')
         .toLowerCase(),
     };
+    cardsByCharId.get(card.c)?.push(enriched);
+    return enriched;
   });
 
   return {
@@ -90,5 +110,6 @@ export async function loadData() {
     charById,
     cards,
     cardById: new Map(cards.map((c) => [c.id, c])),
+    cardsByCharId,
   };
 }

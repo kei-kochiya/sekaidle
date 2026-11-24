@@ -1,7 +1,7 @@
 /* Character mode: deduce the character from school, birthday and height. */
 
-import { h, icon, announce, clear, prefersReducedMotion, sleep } from './dom.js';
-import { UNITS, SCHOOLS, images, formatBirthday, birthdayValue } from './data.js';
+import { h, icon, announce, prefersReducedMotion, sleep } from './dom.js';
+import { UNITS, SCHOOLS, images, formatBirthday, birthdayValue, cardArtVariants } from './data.js';
 import { MAX_GUESSES } from './store.js';
 import { pickDaily, puzzleNumber } from './rng.js';
 import {
@@ -29,10 +29,42 @@ export function compareCharacters(guess, answer) {
   };
 }
 
+function wrapCross(text) {
+  if (typeof text !== 'string' || !text.includes('×')) return text;
+  const [left, ...rest] = text.split('×');
+  return [left, '×', h('wbr'), rest.join('×')];
+}
+
 export function mountCharacterGame(root, ctx) {
   const { data, mode, dateKey } = ctx;
-  const { characters, charById } = data;
+  const { characters, charById, cardsByCharId } = data;
   const reduced = prefersReducedMotion();
+
+  // Roll a random 3★ or 4★ card thumbnail (untrained or trained, respecting single-art cards)
+  // for each character so portraits feel fresh instead of always showing their initial 4★ untrained.
+  const sessionAvatarById = new Map();
+  for (const ch of characters) {
+    const pool = [];
+    for (const card of cardsByCharId.get(ch.id) ?? []) {
+      for (const trained of cardArtVariants(card)) {
+        pool.push(images.thumb(card.b, trained));
+      }
+    }
+    const picked = pool.length
+      ? pool[Math.floor(Math.random() * pool.length)]
+      : images.thumb(ch.avatar, false);
+    sessionAvatarById.set(ch.id, picked);
+  }
+
+  const charAvatar = (ch, size, label) =>
+    createAvatar({
+      src: sessionAvatarById.get(ch.id),
+      fallback: images.thumb(ch.avatar, false),
+      initial: ch.short[0],
+      color: ch.color,
+      size,
+      label,
+    });
 
   const createAnswer = () => {
     const ids = characters.map((c) => c.id);
@@ -124,7 +156,7 @@ export function mountCharacterGame(root, ctx) {
         dataset: { id: ch.id },
         onclick: () => select(ch.id),
       },
-      createAvatar({ src: images.thumb(ch.avatar), initial: ch.short[0], color: ch.color, size: 52 }),
+      charAvatar(ch, 52),
       h('span', { class: 'char-name' }, ch.short),
       h('span', { class: 'sr-only guessed-note' }),
     );
@@ -155,7 +187,7 @@ export function mountCharacterGame(root, ctx) {
     const tokens = (selectedId == null ? input.value : '').toLowerCase().split(/\s+/).filter(Boolean);
     let visible = 0;
     for (const ch of characters) {
-      const hay = `${ch.name} ${ch.short} ${UNITS[ch.unit].label} ${UNITS[ch.unit].short}`.toLowerCase();
+      const hay = `${ch.name} ${ch.short} ${UNITS[ch.unit].label} ${UNITS[ch.unit].short} ${ch.unit}`.toLowerCase();
       const show = tokens.every((t) => hay.includes(t));
       cells.get(ch.id).hidden = !show;
       if (show) visible += 1;
@@ -174,9 +206,7 @@ export function mountCharacterGame(root, ctx) {
     const ch = charById.get(id);
     input.value = ch.name;
     submit.disabled = false;
-    lead.replaceChildren(
-      createAvatar({ src: images.thumb(ch.avatar), initial: ch.short[0], color: ch.color, size: 28 }),
-    );
+    lead.replaceChildren(charAvatar(ch, 28));
     applyFilter();
     setOpen(false);
     announce(`${ch.name} selected. Press Guess to submit.`);
@@ -249,17 +279,7 @@ export function mountCharacterGame(root, ctx) {
       'li',
       { class: pending ? 'row row-character is-new' : 'row row-character' },
       h('span', { class: 'sr-only' }, `${guessChar.name}.`),
-      h(
-        'div',
-        { class: 'row-who' },
-        createAvatar({
-          src: images.thumb(guessChar.avatar),
-          initial: guessChar.short[0],
-          color: guessChar.color,
-          size: 40,
-        }),
-        h('span', { class: 'row-name' }, guessChar.short),
-      ),
+      h('div', { class: 'row-who' }, charAvatar(guessChar, 40), h('span', { class: 'row-name' }, guessChar.short)),
       tiles,
     );
     row.tiles = tiles;
@@ -330,6 +350,7 @@ export function mountCharacterGame(root, ctx) {
 
   function renderEnd() {
     const won = session.status === 'won';
+    const exhausted = session.guesses.length >= MAX_GUESSES;
     root.dataset.outcome = session.status;
     gauge.set(session.guesses.length, session.status);
     title.textContent = answerChar.name;
@@ -337,29 +358,17 @@ export function mountCharacterGame(root, ctx) {
       ? session.guesses.length === 1
         ? 'First try!'
         : `Solved in ${session.guesses.length} of ${MAX_GUESSES}`
-      : session.guesses.length >= MAX_GUESSES
+      : exhausted
         ? 'Out of guesses'
         : 'Gave up';
     hint.hidden = true;
     if (giveUp) giveUp.hidden = true;
-    mystery.replaceWith(
-      h(
-        'div',
-        { class: 'mystery is-revealed' },
-        createAvatar({
-          src: images.thumb(answerChar.avatar),
-          initial: answerChar.short[0],
-          color: answerChar.color,
-          size: 96,
-          label: answerChar.name,
-        }),
-      ),
-    );
+    mystery.replaceWith(h('div', { class: 'mystery is-revealed' }, charAvatar(answerChar, 96, answerChar.name)));
 
     const facts = h(
       'dl',
       { class: 'facts' },
-      fact('Unit', UNITS[answerChar.unit].label),
+      fact('Unit', wrapCross(UNITS[answerChar.unit].label)),
       fact('School', SCHOOLS[answerChar.school].label),
       fact('Birthday', formatBirthday(answerChar.birthday)),
       fact('Height', `${answerChar.height} cm`),
@@ -377,7 +386,7 @@ export function mountCharacterGame(root, ctx) {
     announce(
       won
         ? `Correct! It was ${answerChar.name}, solved in ${plural(session.guesses.length, 'guess')}.`
-        : `Out of guesses. The answer was ${answerChar.name}.`,
+        : `${exhausted ? 'Out of guesses.' : 'Gave up.'} The answer was ${answerChar.name}.`,
     );
   }
 

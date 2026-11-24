@@ -1,7 +1,7 @@
 /* Card mode: name the card from heavily blurred art; each miss sharpens it. */
 
 import { h, icon, announce, prefersReducedMotion, sleep } from './dom.js';
-import { UNITS, UNIT_ORDER, ATTRIBUTES, ATTRIBUTE_ORDER, images } from './data.js';
+import { UNITS, UNIT_ORDER, ATTRIBUTES, ATTRIBUTE_ORDER, images, resolveCardArt } from './data.js';
 import { MAX_GUESSES, store } from './store.js';
 import { pickDaily, dailyCoin, puzzleNumber, epochDay } from './rng.js';
 import {
@@ -34,6 +34,12 @@ const DAILY_DELAY_DAYS = 14;
 
 const artWord = (trained) => (trained ? 'Trained' : 'Untrained');
 
+function wrapCross(text) {
+  if (typeof text !== 'string' || !text.includes('×')) return text;
+  const [left, ...rest] = text.split('×');
+  return [left, '×', h('wbr'), rest.join('×')];
+}
+
 /**
  * Group means the unit; any Virtual Singer counts as "Virtual Singer", whichever unit's version of the
  * card it is. A guess is a card *and* the art it is shown with, so `art` says whether that art
@@ -50,7 +56,7 @@ export function compareCards(guess, answer, { guessTrained, answerTrained }) {
 
 export function mountCardGame(root, ctx) {
   const { data, mode, dateKey } = ctx;
-  const { cards, cardById } = data;
+  const { cards, cardById, characters, charById } = data;
   const reduced = prefersReducedMotion();
   const sorted = cards.slice().sort((a, b) => b.d - a.d || b.id - a.id);
 
@@ -65,7 +71,7 @@ export function mountCardGame(root, ctx) {
       mode === 'daily' ? pickDaily('card', ids, dateKey) : ids[Math.floor(Math.random() * ids.length)];
     const card = cardById.get(answer);
     const coin = mode === 'daily' ? dailyCoin('card', dateKey) : Math.random() < 0.5;
-    const trained = card.trainedOnly || (coin && !card.nt);
+    const trained = resolveCardArt(card, coin);
     return { answer, trained };
   };
 
@@ -74,17 +80,21 @@ export function mountCardGame(root, ctx) {
   let answerCard = cardById.get(session.answer) ?? cardById.get(createAnswer().answer);
   // A guess is a card plus the art (trained or untrained) the player picked for it. Whether the
   // puzzle itself is trained stays hidden until a guess's art tile says so, so thumbnails show the
-  // art the player chose, never the answer's. Trained-only cards have no other art to choose.
+  // art the player chose, never the answer's. Single-art cards clamp to the only art they have.
   let artMode = session.guesses.length
     ? session.trained
       ? 'trained'
       : 'untrained'
     : store.getPref('cardArt', 'untrained');
-  const artFor = (card) => card.trainedOnly || artMode === 'trained';
+  const artFor = (card) => resolveCardArt(card, artMode === 'trained');
 
   // Sessions saved before guesses carried their art were shown the puzzle's art, so they match it.
-  const guessTrained = (index) =>
-    session.arts?.[index] ?? (cardById.get(session.guesses[index]).trainedOnly || session.trained);
+  const guessTrained = (index) => {
+    const saved = session.arts?.[index];
+    if (saved !== undefined) return saved;
+    const gCard = cardById.get(session.guesses[index]);
+    return gCard ? resolveCardArt(gCard, session.trained) : Boolean(session.trained);
+  };
   const guessKey = (id, trained) => `${id}:${trained ? 1 : 0}`;
   const guessedKeys = () => new Set(session.guesses.map((id, i) => guessKey(id, guessTrained(i))));
 
@@ -101,7 +111,8 @@ export function mountCardGame(root, ctx) {
   let busy = false;
   let countdown = null;
   let artAttempt = 0;
-  const state = { query: '', attr: null, unit: null, limit: PAGE_SIZE };
+  let charDrawerOpen = false;
+  const state = { query: '', attr: null, unit: null, char: null, limit: PAGE_SIZE };
 
   /* ---------- hero: the art ---------- */
 
@@ -142,7 +153,7 @@ export function mountCardGame(root, ctx) {
       frame.dataset.state = 'failed';
       failure.hidden = false;
     };
-    const base = images.art(answerCard.b, session.trained);
+    const base = images.art(answerCard.b, resolveCardArt(answerCard, session.trained));
     img.src = artAttempt ? `${base}?retry=${artAttempt}` : base;
     artAttempt += 1;
   }
@@ -219,7 +230,7 @@ export function mountCardGame(root, ctx) {
       color: ATTRIBUTES[key].color,
       onclick: () => {
         state.attr = state.attr === key ? null : key;
-        syncChips();
+        syncFilters();
         resetList();
       },
       key,
@@ -230,17 +241,96 @@ export function mountCardGame(root, ctx) {
       color: UNITS[key].color,
       onclick: () => {
         state.unit = state.unit === key ? null : key;
-        syncChips();
+        if (state.unit && state.char && charById.get(state.char)?.unit !== state.unit) {
+          state.char = null;
+        }
+        syncFilters();
         resetList();
       },
       key,
     }),
   );
+
+  /* Collapsible Character Filter ("drop-out" drawer) */
+  const charTriggerLabel = h('span', { class: 'char-trigger-label' });
+  const charTriggerLead = h('span', { class: 'char-trigger-lead' });
+  const charTrigger = h(
+    'button',
+    {
+      type: 'button',
+      class: 'chip char-filter-trigger',
+      'aria-expanded': 'false',
+      'aria-controls': 'card-char-drawer',
+      onclick: () => setCharDrawer(!charDrawerOpen),
+    },
+    charTriggerLead,
+    charTriggerLabel,
+    icon('chevron', { size: 15 }),
+  );
+  const charClear = h(
+    'button',
+    {
+      type: 'button',
+      class: 'chip char-filter-clear',
+      hidden: true,
+      'aria-label': 'Clear character filter',
+      onclick: () => {
+        state.char = null;
+        setCharDrawer(false);
+        syncFilters();
+        resetList();
+      },
+    },
+    icon('x', { size: 14 }),
+    'Clear',
+  );
+
+  const charCells = new Map();
+  for (const ch of characters) {
+    const btn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'char-mini',
+        'aria-pressed': 'false',
+        dataset: { id: ch.id },
+        onclick: () => {
+          state.char = state.char === ch.id ? null : ch.id;
+          setCharDrawer(false);
+          syncFilters();
+          resetList();
+        },
+      },
+      createAvatar({
+        src: images.thumb(ch.avatar, false),
+        initial: ch.short[0],
+        color: ch.color,
+        size: 36,
+      }),
+      h('span', { class: 'char-mini-name' }, ch.short),
+    );
+    charCells.set(ch.id, btn);
+  }
+  const charDrawer = h(
+    'div',
+    {
+      id: 'card-char-drawer',
+      class: 'char-drawer',
+      role: 'group',
+      'aria-label': 'Filter by character',
+      hidden: true,
+    },
+    [...charCells.values()],
+  );
+  const charFilterRow = h('div', { class: 'char-filter-row' }, charTrigger, charClear);
+
   const filters = h(
     'div',
     { class: 'filters' },
     h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by attribute' }, attrChips),
     h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by group' }, unitChips),
+    charFilterRow,
+    charDrawer,
   );
   const count = h('p', { class: 'results-count', 'aria-live': 'polite' });
   const list = h('ul', { class: 'card-list', 'aria-label': 'Cards' });
@@ -293,7 +383,7 @@ export function mountCardGame(root, ctx) {
     results,
   );
 
-  function chip(label, { lead, color, onclick, key }) {
+  function chip(labelText, { lead: chipLead, color, onclick, key }) {
     return h(
       'button',
       {
@@ -304,14 +394,68 @@ export function mountCardGame(root, ctx) {
         style: { '--chip': color },
         onclick,
       },
-      lead ?? h('span', { class: 'chip-dot', 'aria-hidden': 'true' }),
-      label,
+      chipLead ?? h('span', { class: 'chip-dot', 'aria-hidden': 'true' }),
+      labelText,
     );
   }
 
-  function syncChips() {
+  function setCharDrawer(open) {
+    charDrawerOpen = open;
+    charDrawer.hidden = !open;
+    charTrigger.setAttribute('aria-expanded', String(open));
+    charTrigger.dataset.open = String(open);
+  }
+
+  function syncFilters() {
     for (const c of attrChips) c.setAttribute('aria-pressed', String(c.dataset.key === state.attr));
     for (const c of unitChips) c.setAttribute('aria-pressed', String(c.dataset.key === state.unit));
+
+    for (const ch of characters) {
+      const cell = charCells.get(ch.id);
+      const visible = !state.unit || ch.unit === state.unit;
+      cell.hidden = !visible;
+      cell.setAttribute('aria-pressed', String(state.char === ch.id));
+    }
+
+    if (state.char != null) {
+      const chosen = charById.get(state.char);
+      charTrigger.classList.add('is-selected');
+      charTriggerLead.replaceChildren(
+        createAvatar({
+          src: images.thumb(chosen.avatar, false),
+          initial: chosen.short[0],
+          color: chosen.color,
+          size: 20,
+        }),
+      );
+      charTriggerLabel.textContent = chosen.name;
+      charClear.hidden = false;
+    } else {
+      charTrigger.classList.remove('is-selected');
+      charTriggerLead.replaceChildren();
+      charTriggerLabel.textContent = state.unit
+        ? `Character: All ${UNITS[state.unit].short}`
+        : 'Character: All';
+      charClear.hidden = true;
+    }
+  }
+
+  function syncArtButtons() {
+    const selectedCard = selectedId != null ? cardById.get(selectedId) : null;
+    const effectiveKey = selectedCard
+      ? artFor(selectedCard)
+        ? 'trained'
+        : 'untrained'
+      : artMode;
+
+    for (const button of artButtons) {
+      const key = button.dataset.key;
+      const unavailable =
+        Boolean(selectedCard?.trainedOnly && key === 'untrained') ||
+        Boolean(selectedCard?.untrainedOnly && key === 'trained');
+      button.disabled = unavailable;
+      button.setAttribute('aria-pressed', String(key === effectiveKey));
+    }
   }
 
   function setOpen(open) {
@@ -319,13 +463,14 @@ export function mountCardGame(root, ctx) {
     toggle.setAttribute('aria-expanded', String(open));
     input.setAttribute('aria-expanded', String(open));
     toggle.setAttribute('aria-label', open ? 'Hide cards' : 'Show cards');
+    if (!open && charDrawerOpen) setCharDrawer(false);
   }
 
   const label = (card) => `${card.n} · ${card.character.short} · ${artWord(artFor(card))}`;
 
-  function setArtMode(mode) {
-    artMode = mode;
-    for (const button of artButtons) button.setAttribute('aria-pressed', String(button.dataset.key === mode));
+  function setArtMode(nextMode) {
+    artMode = nextMode;
+    syncArtButtons();
     paintSelection();
     renderList();
   }
@@ -344,6 +489,7 @@ export function mountCardGame(root, ctx) {
       (card) =>
         (!state.attr || card.at === state.attr) &&
         (!state.unit || card.unit === state.unit) &&
+        (!state.char || card.c === state.char) &&
         tokens.every((t) => card.haystack.includes(t)),
     );
   }
@@ -353,6 +499,12 @@ export function mountCardGame(root, ctx) {
     list.scrollTop = 0;
     results.scrollTop = 0;
     renderList();
+  }
+
+  function cardArtBadgeText(card, trained) {
+    if (card.trainedOnly) return 'Trained only';
+    if (card.untrainedOnly) return 'Untrained only';
+    return artWord(trained);
   }
 
   function renderList() {
@@ -387,7 +539,7 @@ export function mountCardGame(root, ctx) {
                 card.character.short,
                 ' · ',
                 cardMeta(card),
-                h('span', { class: 'art-tag' }, card.trainedOnly ? 'Trained only' : artWord(trained)),
+                h('span', { class: 'art-tag' }, cardArtBadgeText(card, trained)),
               ),
             ),
             done && h('span', { class: 'card-opt-done' }, 'Guessed'),
@@ -417,6 +569,7 @@ export function mountCardGame(root, ctx) {
     for (const button of list.querySelectorAll('.card-opt')) {
       button.setAttribute('aria-pressed', String(Number(button.dataset.id) === id));
     }
+    syncArtButtons();
     if (id == null) {
       submit.disabled = true;
       lead.replaceChildren(icon('search'));
@@ -464,6 +617,13 @@ export function mountCardGame(root, ctx) {
     submitGuess();
   }
 
+  picker.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && charDrawerOpen) {
+      event.stopPropagation();
+      setCharDrawer(false);
+      charTrigger.focus();
+    }
+  });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') setOpen(false);
     if (event.key === 'Enter' && !event.isComposing) {
@@ -487,7 +647,8 @@ export function mountCardGame(root, ctx) {
   const history = h('section', { class: 'history', 'aria-label': 'Guesses' }, list2, hint);
 
   function buildRow(card, trained, { pending }) {
-    const result = compareCards(card, answerCard, { guessTrained: trained, answerTrained: session.trained });
+    const answerTrained = resolveCardArt(answerCard, session.trained);
+    const result = compareCards(card, answerCard, { guessTrained: trained, answerTrained });
     const tiles = [
       createTile({
         kind: 'attr',
@@ -540,8 +701,9 @@ export function mountCardGame(root, ctx) {
     if (guessedKeys().has(guessKey(card.id, trained))) return;
     busy = true;
     const keepFocus = document.activeElement === input;
+    const answerTrained = resolveCardArt(answerCard, session.trained);
     // Only the exact card in the exact art wins. Right card, other art is a miss, and the art tile says so.
-    const exact = card.id === answerCard.id && trained === session.trained;
+    const exact = card.id === answerCard.id && trained === answerTrained;
     applyGuess(session, card.id, { correct: exact, art: trained });
     select(null);
     input.value = '';
@@ -566,7 +728,7 @@ export function mountCardGame(root, ctx) {
             ? 'Same character, attribute and group, but a different card. Let the art decide.'
             : '';
       // The art tile has just told the player which art the puzzle shows; the picker follows it.
-      setArtMode(session.trained ? 'trained' : 'untrained');
+      setArtMode(answerTrained ? 'trained' : 'untrained');
     }
     announce(
       `${card.n}, ${artWord(trained).toLowerCase()} art. Attribute ${stateWords('attr', result.attr)}. Group ${stateWords('group', result.group)}. Character ${stateWords('character', result.character)}. Art ${stateWords('art', result.art)}.` +
@@ -581,8 +743,9 @@ export function mountCardGame(root, ctx) {
 
   function shareText() {
     const marks = { correct: '🟩', wrong: '⬛' };
+    const answerTrained = resolveCardArt(answerCard, session.trained);
     const rows = session.guesses.map((id, i) => {
-      const r = compareCards(cardById.get(id), answerCard, { guessTrained: guessTrained(i), answerTrained: session.trained });
+      const r = compareCards(cardById.get(id), answerCard, { guessTrained: guessTrained(i), answerTrained });
       return [r.attr, r.group, r.character, r.art].map((s) => marks[s]).join('');
     });
     const score = session.status === 'won' ? session.guesses.length : 'X';
@@ -592,6 +755,8 @@ export function mountCardGame(root, ctx) {
 
   function renderEnd() {
     const won = session.status === 'won';
+    const exhausted = session.guesses.length >= MAX_GUESSES;
+    const answerTrained = resolveCardArt(answerCard, session.trained);
     root.dataset.outcome = session.status;
     gauge.set(session.guesses.length, session.status);
     setStage(null);
@@ -602,7 +767,7 @@ export function mountCardGame(root, ctx) {
       ? session.guesses.length === 1
         ? 'First try!'
         : `Solved in ${session.guesses.length} of ${MAX_GUESSES}`
-      : session.guesses.length >= MAX_GUESSES
+      : exhausted
         ? 'Out of guesses'
         : 'Gave up';
     hint.hidden = true;
@@ -620,8 +785,8 @@ export function mountCardGame(root, ctx) {
       { class: 'facts' },
       fact('Character', answerCard.character.name),
       fact('Attribute', ATTRIBUTES[answerCard.at].label),
-      fact('Group', UNITS[answerCard.unit].label),
-      fact('Rarity', `${answerCard.r}-star, ${session.trained ? 'trained' : 'untrained'} art`),
+      fact('Group', wrapCross(UNITS[answerCard.unit].label)),
+      fact('Rarity', `${answerCard.r}-star, ${answerTrained ? 'trained' : 'untrained'} art`),
       fact('Released (JP)', released),
     );
     const actions = h('div', { class: 'result-actions' }, createShareButton(shareText), ...endActions());
@@ -636,7 +801,7 @@ export function mountCardGame(root, ctx) {
     announce(
       won
         ? `Correct! It was ${answerCard.n}, solved in ${plural(session.guesses.length, 'guess')}.`
-        : `Out of guesses. The answer was ${answerCard.n}.`,
+        : `${exhausted ? 'Out of guesses.' : 'Gave up.'} The answer was ${answerCard.n}.`,
     );
   }
 
@@ -671,10 +836,13 @@ export function mountCardGame(root, ctx) {
 
   root.dataset.outcome = 'playing';
   root.replaceChildren(hero, picker, history);
-  syncChips();
+  syncFilters();
   setArtMode(artMode);
   session.guesses.forEach((id, i) => {
-    list2.prepend(buildRow(cardById.get(id), guessTrained(i), { pending: false }).row);
+    const gCard = cardById.get(id);
+    if (gCard) {
+      list2.prepend(buildRow(gCard, guessTrained(i), { pending: false }).row);
+    }
   });
   hint.hidden = session.guesses.length > 0;
   setStage(Math.min(session.guesses.length, BLUR.length - 1));

@@ -125,6 +125,7 @@ let cards = jpCards
   .sort((a, b) => a.id - b.id)
   .map((c) => {
     const en = enPrefix.get(c.id);
+    const prev = known.get(c.id);
     const card = {
       id: c.id,
       c: c.characterId,
@@ -135,7 +136,13 @@ let cards = jpCards
       d: Math.floor(c.releaseAt / 86400000),
     };
     if (!en) card.jp = 1; // only the Japanese title exists (yet)
-    if (c.initialSpecialTrainingStatus === 'done') card.t = 1; // only has trained art
+
+    const trainedOnlyMeta = c.initialSpecialTrainingStatus === 'done';
+    const untrainedOnlyMeta =
+      !trainedOnlyMeta && Array.isArray(c.specialTrainingCosts) && c.specialTrainingCosts.length === 0;
+
+    if (trainedOnlyMeta || prev?.t) card.t = 1; // only has trained art
+    else if (untrainedOnlyMeta || prev?.nt) card.nt = 1; // only has untrained art
     return card;
   });
 
@@ -147,27 +154,30 @@ if (VERIFY) {
   const fresh = cards.filter((c) => !known.has(c.id));
   console.log(`Checking ${fresh.length} new card(s) for art on the image CDN…`);
   const checks = await pool(fresh, 8, async (c) => {
-    const variant = c.t ? 'after_training' : 'normal';
-    const [thumb, art] = await Promise.all([
-      exists(`${IMG}thumbnail/chara/${c.b}_${variant}.png`),
-      exists(`${IMG}character/member_small/${c.b}/card_${variant}.png`),
+    const [normalThumb, normalArt, trainedThumb, trainedArt] = await Promise.all([
+      c.t ? false : exists(`${IMG}thumbnail/chara/${c.b}_normal.png`),
+      c.t ? false : exists(`${IMG}character/member_small/${c.b}/card_normal.png`),
+      c.nt ? false : exists(`${IMG}thumbnail/chara/${c.b}_after_training.png`),
+      c.nt ? false : exists(`${IMG}character/member_small/${c.b}/card_after_training.png`),
     ]);
-    let trainedOk = true;
-    if (!c.t) {
-      const [trainedArt, trainedThumb] = await Promise.all([
-        exists(`${IMG}character/member_small/${c.b}/card_after_training.png`),
-        exists(`${IMG}thumbnail/chara/${c.b}_after_training.png`),
-      ]);
-      trainedOk = trainedArt && trainedThumb;
-    }
-    return { c, ok: thumb && art, trainedOk };
+    const normalOk = Boolean(normalThumb && normalArt);
+    const trainedOk = Boolean(trainedThumb && trainedArt);
+    return { c, normalOk, trainedOk, ok: normalOk || trainedOk };
   });
-  const deferred = checks.filter((x) => !x.ok).map((x) => x.c.id);
-  const noTrained = new Set(checks.filter((x) => x.ok && !x.trainedOk).map((x) => x.c.id));
-  if (deferred.length) console.log('Deferring cards whose art is not online yet:', deferred.join(', '));
-  cards = cards.filter((c) => known.has(c.id) || !deferred.includes(c.id));
+  const deferred = new Set(checks.filter((x) => !x.ok).map((x) => x.c.id));
+  const onlyTrained = new Set(checks.filter((x) => x.ok && !x.normalOk && x.trainedOk).map((x) => x.c.id));
+  const onlyUntrained = new Set(checks.filter((x) => x.ok && x.normalOk && !x.trainedOk).map((x) => x.c.id));
+
+  if (deferred.size) console.log('Deferring cards whose art is not online yet:', [...deferred].join(', '));
+  cards = cards.filter((c) => known.has(c.id) || !deferred.has(c.id));
   for (const c of cards) {
-    if (noTrained.has(c.id) || known.get(c.id)?.nt) c.nt = 1; // no trained art available
+    if (onlyTrained.has(c.id)) {
+      c.t = 1;
+      delete c.nt;
+    } else if (onlyUntrained.has(c.id)) {
+      c.nt = 1;
+      delete c.t;
+    }
   }
 }
 
